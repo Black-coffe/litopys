@@ -1,0 +1,30 @@
+{
+  "vulyk-build": {
+    "count": 3,
+    "last_used": "2026-09-14"
+  },
+  "vulyk-handoff": {
+    "count": 4,
+    "last_used": "2026-09-15"
+  },
+  "vulyk-resume": {
+    "count": 1,
+    "last_used": "2026-09-14"
+  },
+  "vulyk-plan": {
+    "count": 3,
+    "last_used": "2026-09-15"
+  },
+  "vulyk-ship": {
+    "count": 3,
+    "last_used": "2026-09-15"
+  },
+  "fact-check": {
+    "count": 1,
+    "last_used": "2026-09-21"
+  },
+  "supergrill": {
+    "count": 1,
+    "last_used": "2026-09-21"
+  }
+}
