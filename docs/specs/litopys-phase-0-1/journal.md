@@ -14,3 +14,4 @@
 - 2026-09-21T13:42:23Z · 04-council:RED · round 2 verdict RED at ebda9de pack e16ac0b7e26a · next: repair
 - 2026-09-21T14:03:52Z · 03-building · wave 8 closed, baseline gate re-run · next: story 10 closed by the Queen-dispatched worker; bench in VULYK: hits 4/5 · refs 7/8 · 143s with real tokens - the phase-0 number; relaunching for round 3
 - 2026-09-21T14:04:26Z · 04-council:open · round 3 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-3 · next: dispatch:haiku,sonnet,opus,review
+- 2026-09-21T14:28:59Z · 04-council:GREEN · round 3 verdict GREEN at 9cea6d0 pack ac0d2bda0834 · next: green
