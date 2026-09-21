@@ -3,6 +3,7 @@
 #
 #   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
 #          bash bin/litopys distill record --journal <raw.md> --body <body.md|->
+#          bash bin/litopys distill next | distill finish
 #          bash bin/litopys bench
 #          bash bin/litopys --version | help
 #
@@ -29,6 +30,10 @@ litopys $VERSION
   litopys distill next [--max N]
       Take the distill.lock mutex (stale after 30 minutes), move bench journals to
       .litopys/raw/skipped/, print up to N (default 3) eligible journal paths oldest first.
+  litopys distill finish
+      Commit only docs/chronicle/ on the current branch (never the host's other staged or
+      unstaged work) and release the distill lock. Prints `committed <sha7>` or
+      `uncommitted: <reason>`; always exit 0.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
@@ -681,13 +686,94 @@ distill_next() {
   return 0
 }
 
+# --- distill finish (C12/C14) ---------------------------------------------------------------
+# Step 3 of the distiller: commit *only* `docs/chronicle/` on whatever branch the host is on and
+# release the lock. Never a gate - a repo that cannot take the commit keeps the records in the
+# working tree and gets one line saying why, still exit 0. The host's index outside
+# `docs/chronicle/` is never read and never written: one `git add -- docs/chronicle` and one
+# pathspec-limited `git commit -- docs/chronicle`, no `-a`, no `-A`, no `--no-verify`.
+
+git_block_reason() { # git_block_reason <root> - prints why this repo cannot take the commit ("" = it can)
+  local root="$1" gitdir
+  if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
+    printf '%s\n' "not a git repository"; return 0
+  fi
+  gitdir="$(git -C "$root" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [ -n "$gitdir" ]; then
+    # In-progress operations first: a real rebase also leaves HEAD detached, and "rebase in
+    # progress" is the more useful of the two reasons.
+    [ -e "$gitdir/MERGE_HEAD" ] && { printf '%s\n' "merge in progress"; return 0; }
+    if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+      printf '%s\n' "rebase in progress"; return 0
+    fi
+    [ -e "$gitdir/CHERRY_PICK_HEAD" ] && { printf '%s\n' "cherry-pick in progress"; return 0; }
+    [ -e "$gitdir/REVERT_HEAD" ] && { printf '%s\n' "revert in progress"; return 0; }
+  fi
+  if [ -z "$(git -C "$root" symbolic-ref -q HEAD 2>/dev/null || true)" ]; then
+    printf '%s\n' "detached HEAD"; return 0
+  fi
+  printf '%s\n' ""
+}
+
+git_error_line() { # git_error_line <stderr-file> - git's first real complaint, warnings skipped
+  local f="$1" line
+  line="$(awk 'NF && $0 !~ /^warning:/ { print; exit }' "$f" 2>/dev/null || true)"
+  [ -n "$line" ] || line="$(awk 'NF { print; exit }' "$f" 2>/dev/null || true)"
+  [ -n "$line" ] || line="git commit failed"
+  printf '%s\n' "$(trim "$line")"
+}
+
+distill_finish() {
+  if [ $# -gt 0 ]; then
+    echo "litopys distill finish: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+
+  local root lock reason="" n sha errfile
+  root="$(project_root)"
+  lock="$root/.litopys/distill.lock"
+
+  reason="$(git_block_reason "$root")"
+  if [ -z "$reason" ]; then
+    errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.finish-stderr")"
+    if [ ! -d "$root/docs/chronicle" ]; then
+      reason="nothing to commit"
+    elif ! git -C "$root" add -- docs/chronicle 2>"$errfile"; then
+      reason="$(git_error_line "$errfile")"
+    elif [ -z "$(git -C "$root" diff --cached --name-only -- docs/chronicle 2>/dev/null || true)" ]; then
+      reason="nothing to commit"
+    else
+      # <n> is read off the staged diff, never off distill.jsonl: the message must describe
+      # this commit, not the journal that produced it.
+      n="$(git -C "$root" diff --cached -- docs/chronicle 2>/dev/null | awk -v m=" · session · " '/^\+/ && !/^\+\+\+/ && index($0, m) { c++ } END { print c + 0 }')"
+      n="${n:-0}"
+      if git -C "$root" commit -m "chore(chronicle): distill $n session(s) [litopys]" -- docs/chronicle > /dev/null 2>"$errfile"; then
+        sha="$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)"
+      else
+        reason="$(git_error_line "$errfile")"
+      fi
+    fi
+    rm -f "$errfile" 2>/dev/null || true
+  fi
+
+  # The lock goes whatever happened - a refused commit must not wedge the next run (C12).
+  rm -rf "$lock" 2>/dev/null || true
+
+  if [ -n "$reason" ]; then
+    printf 'uncommitted: %s\n' "$reason"
+  else
+    printf 'committed %s\n' "${sha:-unknown}"
+  fi
+  return 0
+}
+
 cmd_distill() {
   local verb="${1:-}"
   [ $# -gt 0 ] && shift
   case "$verb" in
     record) distill_record "$@"; return $? ;;
     next) distill_next "$@"; return $? ;;
-    "") echo "litopys distill: a verb is required (record, next)" >&2; usage; return 2 ;;
+    finish) distill_finish "$@"; return $? ;;
+    "") echo "litopys distill: a verb is required (record, next, finish)" >&2; usage; return 2 ;;
     *) echo "litopys distill: unknown verb '$verb'" >&2; usage; return 2 ;;
   esac
 }

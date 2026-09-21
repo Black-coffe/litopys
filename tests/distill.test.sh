@@ -361,6 +361,183 @@ LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q8/.litopys/raw/$SID.m
 out2="$(LITOPYS_NOW="$NOW" bash "$CLI" distill next 2>/dev/null)"
 printf '%s' "$out2" | refute "N8 next no longer lists the journal record already moved to done/" "$SID"
 
+# --- `distill finish`: the pathspec commit and the refusal list (C12/05) -------------------
+# Every case runs in a throwaway `git init` repo under $T: the assertions are about what git
+# recorded and what the host's index still holds, never about this repository.
+
+newrepo() { # newrepo <name> - throwaway repo with one commit (b.txt); prints its root
+  local r="$T/$1"
+  mkdir -p "$r"
+  git -C "$r" init -q > /dev/null 2>&1 || git init -q "$r" > /dev/null 2>&1
+  git -C "$r" config user.email "t@example.com"
+  git -C "$r" config user.name "Test"
+  git -C "$r" config commit.gpgsign false
+  git -C "$r" config core.autocrlf false
+  git -C "$r" config core.hooksPath "$r/.git/hooks"
+  printf 'base\n' > "$r/b.txt"
+  git -C "$r" add -- b.txt > /dev/null 2>&1
+  git -C "$r" commit -qm init > /dev/null 2>&1
+  printf '%s\n' "$r"
+}
+
+put_record() { # put_record <root> <sid> <started> - one real record + chronicle line
+  local r="$1" sid="$2" started="$3"
+  mkdir -p "$r/.litopys/raw"
+  mkjournal "$r/.litopys/raw/$sid.md" "$sid" "$started" "do work" closed
+  CLAUDE_PROJECT_DIR="$r" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+    --journal "$r/.litopys/raw/$sid.md" --body "$FIX/distill-body.md" > /dev/null 2>&1
+}
+
+outside_chronicle() { # outside_chronicle <root> - paths in HEAD that are not under docs/chronicle/
+  local r="$1" f out=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in docs/chronicle/*) ;; *) out="$out $f" ;; esac
+  done < <(git -C "$r" show --pretty=format: --name-only HEAD)
+  printf '%s' "$out"
+}
+
+# F1: the happy path - only docs/chronicle/ is committed, the host's index is left alone.
+R1="$(newrepo f1-happy)"
+put_record "$R1" "f1aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+printf 'staged\n' > "$R1/a.txt"
+git -C "$R1" add -- a.txt > /dev/null 2>&1
+printf 'edited\n' >> "$R1/b.txt"
+mkdir -p "$R1/.litopys/distill.lock"
+BR0="$(git -C "$R1" symbolic-ref --short HEAD 2>/dev/null)"
+export CLAUDE_PROJECT_DIR="$R1"
+out="$(bash "$CLI" distill finish 2>"$T/f1.err")"; rc=$?
+eq "F1 distill finish exits 0" "0" "$rc"
+eq "F1 nothing on stderr" "" "$(cat "$T/f1.err")"
+case "$out" in
+  "committed "*) echo "  ok    F1 prints committed <sha7>" ;;
+  *) bad "F1 expected 'committed <sha7>', got '$out'" ;;
+esac
+sha="${out#committed }"
+eq "F1 sha is seven characters" "7" "${#sha}"
+eq "F1 sha is HEAD" "$(git -C "$R1" rev-parse --short=7 HEAD)" "$sha"
+eq "F1 commit touches nothing outside docs/chronicle/" "" "$(outside_chronicle "$R1")"
+eq "F1 the record is in the commit" "1" \
+  "$(git -C "$R1" show --pretty=format: --name-only HEAD | grep -c '^docs/chronicle/sessions/')"
+eq "F1 a.txt is still staged" "a.txt" "$(git -C "$R1" diff --cached --name-only)"
+eq "F1 b.txt is still modified and unstaged" "b.txt" "$(git -C "$R1" diff --name-only)"
+eq "F1 branch unchanged" "$BR0" "$(git -C "$R1" symbolic-ref --short HEAD 2>/dev/null)"
+eq "F1 commit message names one session" "chore(chronicle): distill 1 session(s) [litopys]" \
+  "$(git -C "$R1" log -1 --pretty=%s)"
+no_file "F1 lock released" "$R1/.litopys/distill.lock"
+
+# F1b: run it again with no lock present - idempotent, prints normally, creates no commit.
+out2="$(bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F1b second run exits 0" "0" "$rc"
+eq "F1b second run has nothing to commit" "uncommitted: nothing to commit" "$out2"
+eq "F1b no second commit" "2" "$(git -C "$R1" rev-list --count HEAD)"
+
+# F2: the refusal list - each git state leaves the records in the working tree, untracked.
+refuses() { # refuses <label> <root> <expected reason>
+  local label="$1" r="$2" want="$3" head0 out
+  head0="$(git -C "$r" rev-parse HEAD 2>/dev/null || true)"
+  mkdir -p "$r/.litopys/distill.lock"
+  out="$(CLAUDE_PROJECT_DIR="$r" bash "$CLI" distill finish 2>/dev/null)"; local rc=$?
+  eq "$label exits 0" "0" "$rc"
+  eq "$label says why" "uncommitted: $want" "$out"
+  eq "$label created no commit" "$head0" "$(git -C "$r" rev-parse HEAD 2>/dev/null || true)"
+  eq "$label left the record untracked" "" "$(git -C "$r" ls-files -- docs/chronicle)"
+  if [ -d "$r/docs/chronicle/sessions" ]; then echo "  ok    $label record still in the working tree"
+  else bad "$label lost the record"; fi
+  no_file "$label released the lock" "$r/.litopys/distill.lock"
+}
+
+R2="$(newrepo f2-detached)"
+put_record "$R2" "f2aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+git -C "$R2" checkout -q --detach > /dev/null 2>&1
+refuses "F2 detached HEAD" "$R2" "detached HEAD"
+
+R3="$(newrepo f3-merge)"
+put_record "$R3" "f3aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+git -C "$R3" rev-parse HEAD > "$R3/.git/MERGE_HEAD"
+refuses "F3 merge in progress" "$R3" "merge in progress"
+
+R4="$(newrepo f4-rebase)"
+put_record "$R4" "f4aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+mkdir -p "$R4/.git/rebase-merge"
+refuses "F4 rebase in progress" "$R4" "rebase in progress"
+
+R5="$(newrepo f5-cherry)"
+put_record "$R5" "f5aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+git -C "$R5" rev-parse HEAD > "$R5/.git/CHERRY_PICK_HEAD"
+refuses "F5 cherry-pick in progress" "$R5" "cherry-pick in progress"
+
+# F6: not a git repository at all.
+R6="$T/f6-nogit"
+mkdir -p "$R6"
+put_record "$R6" "f6aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+mkdir -p "$R6/.litopys/distill.lock"
+export CLAUDE_PROJECT_DIR="$R6"
+out="$(bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F6 non-repo exits 0" "0" "$rc"
+eq "F6 non-repo says why" "uncommitted: not a git repository" "$out"
+no_file "F6 non-repo released the lock" "$R6/.litopys/distill.lock"
+
+# F7: a repo with no docs/chronicle at all.
+R7="$(newrepo f7-nothing)"
+export CLAUDE_PROJECT_DIR="$R7"
+eq "F7 nothing to commit" "uncommitted: nothing to commit" "$(bash "$CLI" distill finish 2>/dev/null)"
+eq "F7 created no commit" "1" "$(git -C "$R7" rev-list --count HEAD)"
+
+# F8: no git identity anywhere - git's own first complaint is the reason.
+R8="$(newrepo f8-identity)"
+put_record "$R8" "f8aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+git -C "$R8" config --unset user.email > /dev/null 2>&1
+git -C "$R8" config --unset user.name > /dev/null 2>&1
+mkdir -p "$T/emptyhome"
+export CLAUDE_PROJECT_DIR="$R8"
+out="$(HOME="$T/emptyhome" USERPROFILE="$T/emptyhome" GIT_CONFIG_GLOBAL="$T/emptyhome/none" \
+  GIT_CONFIG_SYSTEM="$T/emptyhome/none" bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F8 identityless repo exits 0" "0" "$rc"
+case "$out" in
+  "uncommitted: nothing to commit") bad "F8 expected git's own complaint, got '$out'" ;;
+  "uncommitted: "?*) echo "  ok    F8 reports git's first stderr line: $out" ;;
+  *) bad "F8 expected 'uncommitted: <git error>', got '$out'" ;;
+esac
+eq "F8 created no commit" "1" "$(git -C "$R8" rev-list --count HEAD)"
+
+# F9: host commit hooks are run, never bypassed.
+R9="$(newrepo f9-hook)"
+put_record "$R9" "f9aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+printf '#!/bin/sh\nexit 1\n' > "$R9/.git/hooks/pre-commit"
+chmod +x "$R9/.git/hooks/pre-commit"
+export CLAUDE_PROJECT_DIR="$R9"
+out="$(bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F9 failing pre-commit hook exits 0" "0" "$rc"
+case "$out" in
+  "uncommitted: "?*) echo "  ok    F9 failing hook leaves the records uncommitted" ;;
+  *) bad "F9 expected 'uncommitted: <reason>', got '$out'" ;;
+esac
+eq "F9 failing hook created no commit" "1" "$(git -C "$R9" rev-list --count HEAD)"
+printf '#!/bin/sh\ntouch "$(git rev-parse --show-toplevel)/hook-ran"\nexit 0\n' > "$R9/.git/hooks/pre-commit"
+chmod +x "$R9/.git/hooks/pre-commit"
+out="$(bash "$CLI" distill finish 2>/dev/null)"
+case "$out" in
+  "committed "*) echo "  ok    F9 passing hook commits" ;;
+  *) bad "F9 expected a commit with a passing hook, got '$out'" ;;
+esac
+if [ -f "$R9/hook-ran" ]; then echo "  ok    F9 the hook ran (not --no-verify)"
+else bad "F9 the pre-commit hook was bypassed"; fi
+
+# F10: <n> counts the session lines in this diff, not the rows in distill.jsonl.
+RA="$(newrepo f10-two)"
+put_record "$RA" "faaaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+put_record "$RA" "fabbbbbb-1111-2222-3333-444455556666" "2026-09-19T08:00:00Z"
+export CLAUDE_PROJECT_DIR="$RA"
+out="$(bash "$CLI" distill finish 2>/dev/null)"
+case "$out" in "committed "*) echo "  ok    F10 two-record run commits" ;; *) bad "F10 got '$out'" ;; esac
+eq "F10 message counts two sessions" "chore(chronicle): distill 2 session(s) [litopys]" \
+  "$(git -C "$RA" log -1 --pretty=%s)"
+eq "F10 commit touches nothing outside docs/chronicle/" "" "$(outside_chronicle "$RA")"
+
+# F11: argument handling - finish takes none.
+eq "F11 stray argument exits 2" "2" "$(bash "$CLI" distill finish --now > /dev/null 2>&1; echo $?)"
+
 if [ -s "$FAILED" ]; then
   echo "distill.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"
   exit 1

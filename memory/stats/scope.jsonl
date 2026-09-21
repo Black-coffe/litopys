@@ -141,3 +141,4 @@
 {"ts":"2026-09-21T15:31:01Z","story":"litopys-phase-2-distill-02-hooks-precompact-banner","declared":4,"changed":5,"out_of_scope":1}
 {"ts":"2026-09-21T15:42:00Z","story":"litopys-phase-2-distill-03-distiller-agent-skill","declared":4,"changed":9,"out_of_scope":5}
 {"ts":"2026-09-21T15:42:14Z","story":"litopys-phase-2-distill-04-distill-queue-lock","declared":3,"changed":4,"out_of_scope":1}
+{"ts":"2026-09-21T15:49:33Z","story":"litopys-phase-2-distill-05-distill-finish-commit","declared":2,"changed":3,"out_of_scope":1}
