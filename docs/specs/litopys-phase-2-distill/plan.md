@@ -168,7 +168,7 @@ The six lines below are the cycle's confirmation artifacts (docs/cycle.md); scri
 -->
 **Approved:** Andrei, 2026-09-21 (one word in the litopys session; gates A and B run by the Queen on the owner's standing authorisation)
 **Briefed:**
-**Branch:**
+**Branch:** vulyk/litopys-phase-2-distill
 **Checked:**
 **Council:**
 **Shipped:**
