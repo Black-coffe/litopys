@@ -145,7 +145,7 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 
 **Approved:** Andrei, 2026-09-21 (in the vulyk session that ran the grill; build runs from a session inside E:/Projects/litopys)
 **Briefed:**
-**Branch:**
+**Branch:** vulyk/litopys-phase-0-1
 **Checked:**
 **Council:**
 **Shipped:**
