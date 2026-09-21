@@ -67,7 +67,7 @@ eq "row keeps the run ts"        "$NOW"   "$(field "$BL" Q1 .ts)"
 eq "row names the project"       "proj"   "$(field "$BL" Q1 .project)"
 eq "row carries the question"    "Which version shipped the alpha gate?" "$(field "$BL" Q1 .question)"
 eq "row names the model"         "sonnet" "$(field "$BL" Q1 .model)"
-eq "row carries the version"     "0.2.0"  "$(field "$BL" Q1 .litopys)"
+eq "row carries the version"     "0.2.1"  "$(field "$BL" Q1 .litopys)"
 eq "seconds is a number"         "number" "$(field "$BL" Q1 '.seconds|type')"
 
 # Q1: the keyphrase differs in case from the answer text, both refs present

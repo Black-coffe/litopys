@@ -34,7 +34,7 @@ fi
 
 plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)}"
 version="$(jq -r '.version // empty' "$plugin_root/.claude-plugin/plugin.json" 2>/dev/null || true)"
-[ -n "$version" ] || version="0.2.0"
+[ -n "$version" ] || version="0.2.1"
 
 count_md() { # count_md <dir> - .md files directly in <dir>, 0 when it does not exist
   local n=0 f
