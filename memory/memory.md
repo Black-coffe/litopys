@@ -53,3 +53,9 @@
 - Consolidated: memory/learnings/CONSOLIDATED.md (run /vulyk-gc to refresh)
 - Human gates rework (2026-09-12): memory/learnings/2026-09-12-human-gates-rework.md — один стоп в начале, дальше агентный совет; «owner looks» как обязательную стадию не возвращать
 - Autonomous cycle / council (v0.12.0, 2026-09-13): docs/specs/autonomous-cycle/ — mechanics in docs/adr/001-cycle-state-contract.md (ADR-001), per-spec state in docs/specs/<slug>/journal.md
+- Golden questions authored in plugin repo, copied at baseline gate (litopys 0.1.0, proposed): docs/adr/001-golden-questions-authored-in-plugin-repo.md
+- Bench via `claude -p` + stub, cache-inclusive tokens (litopys 0.1.0, proposed): docs/adr/002-bench-via-claude-p-cache-inclusive-tokens.md
+- Separate hook scripts, not routed through `bin/litopys` (litopys 0.1.0, proposed): docs/adr/003-separate-hook-scripts.md
+- `.litopys/` self-ignoring scratch directory (litopys 0.1.0, proposed): docs/adr/004-litopys-scratch-directory.md
+- Redaction delegated to host's `scripts/redact.sh`, plugin fallback deferred to phase 2 (litopys 0.1.0, proposed): docs/adr/005-redaction-delegated-to-host.md
+- Phase-2 input, raw journal vs `/export` losses: docs/specs/litopys-phase-0-1/recon/raw-vs-export.md
