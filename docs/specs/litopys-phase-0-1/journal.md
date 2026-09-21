@@ -9,3 +9,5 @@
 - 2026-09-21T12:59:17Z · 03-building · baseline gate passed, story 06 inputs on disk · next: bench in E:/Projects/vulyk: hits 5/5 · refs 7/9 · 140s, 5 rows in .litopys/baseline.jsonl; session a10ea931 (>=100k, 5 turns + /export) journal and export under E:/Projects/vulyk/.litopys/; PAUSE lifted, relaunching for wave 5 and the council
 - 2026-09-21T13:03:25Z · 04-council:open · round 1 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-1 · next: dispatch:haiku,sonnet,opus,review
 - 2026-09-21T13:22:24Z · 04-council:RED · round 1 verdict RED at ac03fbe pack ac71211211e9 · next: repair
+- 2026-09-21T13:32:34Z · 03-building · close-story exit 2 (story 08) · next: verification cell added to ## Commands, story 08 closed by hand, relaunching
+- 2026-09-21T13:33:01Z · 04-council:open · round 2 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-2 · next: dispatch:haiku,sonnet,opus,review
