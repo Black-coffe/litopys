@@ -28,7 +28,7 @@ Turn the empty `litopys` repo into a loadable Claude Code plugin that does two m
 
 **Wave 2** (blocked by 01)
 - `litopys-phase-0-1-02-recall-skill` (sonnet) - `skills/recall/SKILL.md` + `agents/recall.md`, fork context, sonnet, answer-with-refs contract.
-- `litopys-phase-0-1-03-golden-questions` (sonnet) - five VULYK questions with known answers and refs, written in VULYK's repo from its history.
+- `litopys-phase-0-1-03-golden-questions` (sonnet) - five VULYK questions with known answers and refs, authored in examples/vulyk/ from VULYK's history (read-only).
 
 **Wave 3** (blocked by 01, 02, 03)
 - `litopys-phase-0-1-04-bench` (opus) - `bin/litopys bench` -> `.litopys/baseline.jsonl`, stub-driven test.

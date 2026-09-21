@@ -47,6 +47,7 @@ Phase 0 (baseline) and phase 1 (raw journal) of Roadmap v2 in the grill brief. N
 
 The seven asks in quotable form (stories quote these; trace-check reads `> ` lines only):
 
+> Базовая линия «append + recall по тому, что уже есть» меряется ПЕРВОЙ, в фазе 0; фазы 1-3 оправдываются только её превышением (A2, D15).
 > Репо `litopys` = плагин Claude Code: `.claude-plugin/plugin.json` (name `litopys`), `skills/`, `agents/`, `hooks/hooks.json`, `bin/`; грузится через `claude --plugin-dir E:/Projects/litopys` в VULYK и в самом litopys.
 > `bin/litopys append --kind grill|brief|verdict|ship|handoff|note --ref <path> --note "<text>"` дописывает одну датированную строку в `docs/chronicle/YYYY-MM.md` проекта, в котором вызвана; идемпотентна по (ts, kind, ref); не требует модели.
 > Скилл `/litopys:recall <вопрос>` запускает сабагента (sonnet) в fork-контексте, который отвечает по `git log`, тегам, `CHANGELOG*`, `docs/specs/*/brief.md`, `docs/adr/`, `docs/grill/`, `docs/chronicle/`; в главный контекст возвращается только ответ со ссылками на файлы и коммиты.

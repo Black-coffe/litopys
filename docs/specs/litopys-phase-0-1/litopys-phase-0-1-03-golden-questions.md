@@ -14,7 +14,7 @@ blocked_by: [litopys-phase-0-1-01]
 # Golden questions for VULYK, written before any distillation
 
 ## Goal
-After this story `examples/vulyk/golden-questions.md` (in this repo; copied to `E:/Projects/vulyk/docs/chronicle/golden-questions.md` by the owner at the baseline gate) holds five questions about VULYK's history, each with a known answer keyphrase and verified references, in the machine-readable shape `bench` (story 04) parses. They are the fixed yardstick every later phase is measured against, so they are written now, from primary sources, with no distilled material in existence.
+After this story `examples/vulyk/golden-questions.md` (in this repo; copied to `examples/vulyk/golden-questions.md` by the owner at the baseline gate) holds five questions about VULYK's history, each with a known answer keyphrase and verified references, in the machine-readable shape `bench` (story 04) parses. They are the fixed yardstick every later phase is measured against, so they are written now, from primary sources, with no distilled material in existence.
 
 ## Requirements
 > `docs/chronicle/golden-questions.md` для VULYK: 5 вопросов с известным ответом и ссылкой (среди них «что было в релизе до 0.1, как брейнштормили, что устарело»), записанных до любой дистилляции;
@@ -41,7 +41,7 @@ Contract C4 in plan.md (file shape). Sources to read, all in E:/Projects/vulyk: 
 - [ ] Implementation notes record the exact git commands used, so the Queen can audit.
 
 ## Verification
-`grep -c '^## Q[1-5] · ' E:/Projects/vulyk/docs/chronicle/golden-questions.md | grep -qx 5 && grep -c '^- answer: ' E:/Projects/vulyk/docs/chronicle/golden-questions.md | grep -qx 5 && grep -c '^- refs: ' E:/Projects/vulyk/docs/chronicle/golden-questions.md | grep -qx 5`
+`grep -c '^## Q[1-5] · ' examples/vulyk/golden-questions.md | grep -qx 5 && grep -c '^- answer: ' examples/vulyk/golden-questions.md | grep -qx 5 && grep -c '^- refs: ' examples/vulyk/golden-questions.md | grep -qx 5`
 
 ## Implementation notes
 
