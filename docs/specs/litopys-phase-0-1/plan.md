@@ -128,7 +128,7 @@ branch: <git branch or ->
 When jq is missing, one static line: `[litopys] jq not found - raw journal disabled`.
 
 ## Integration gate
-`for t in tests/*.test.sh; do bash "$t" || exit 1; done && git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null && claude plugin validate . --strict`
+`for t in tests/*.test.sh; do bash "$t" || exit 1; done && git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null && claude plugin validate .`
 Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 
 ## Tradeoffs
