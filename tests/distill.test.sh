@@ -55,6 +55,23 @@ newproj() { # newproj <name> - a host project with a queued journal; prints its 
   printf '%s\n' "$p"
 }
 
+mkjournal() { # mkjournal <path> <sid> <started> <first-user-line> <closed|open>
+  local path="$1" sid="$2" started="$3" userline="$4" trailer="${5:-closed}"
+  {
+    printf -- '---\n'
+    printf 'litopys: raw\nversion: 1\n'
+    printf 'session_id: %s\n' "$sid"
+    printf 'started: %s\n' "$started"
+    printf 'cwd: /host/project\nbranch: main\n'
+    printf -- '---\n\n'
+    printf '## user · %s\n%s\n\n' "$started" "$userline"
+    if [ "$trailer" = "closed" ]; then
+      printf '## assistant · %s\nok\n\n' "$started"
+      printf '## closed · %s · other\n' "$started"
+    fi
+  } > "$path"
+}
+
 # --- fixtures are what the story says they are --------------------------------------------
 cat "$FIX/raw-resume.md" | expect "fixture has a mid-file closed marker" "## closed · 2026-09-20T09:40:00Z"
 cat "$FIX/raw-resume.md" | expect "fixture resumes past it" "## user · 2026-09-20T10:02:11Z"
@@ -63,7 +80,9 @@ cat "$FIX/raw-resume.md" | expect "fixture ends closed" "## closed · 2026-09-20
 cat "$FIX/raw-resume.md" | expect "fixture carries an sk- string" "$SECRET"
 cat "$FIX/distill-body.md" | expect "body fixture has a title" "# Resume and compaction survive one journal"
 cat "$FIX/distill-body.md" | expect "body fixture carries a ghp_ token" "$TOKEN"
-for f in "$FIX/raw-resume.md" "$FIX/distill-body.md" "$CLI" "$SRC/tests/distill.test.sh" "$SRC/scripts/redact.sh"; do
+cat "$FIX/raw-bench.md" | expect "bench fixture's first user line is /litopys:recall" "/litopys:recall what is"
+cat "$FIX/raw-bench.md" | expect "bench fixture ends closed" "## closed"
+for f in "$FIX/raw-resume.md" "$FIX/distill-body.md" "$FIX/raw-bench.md" "$CLI" "$SRC/tests/distill.test.sh" "$SRC/scripts/redact.sh"; do
   if LC_ALL=C grep -q $'\r' "$f"; then bad "CRLF in $f"; else echo "  ok    LF only: $(basename "$f")"; fi
 done
 
@@ -210,6 +229,137 @@ printf '%s' "$err" | expect "no verb prints usage" "litopys distill record"
 err="$(bash "$CLI" distill wat 2>&1 >/dev/null)"
 eq "unknown verb exits 2" "2" "$?"
 printf '%s' "$err" | expect "unknown verb is named" "wat"
+
+# --- distill next (C12): lock, skip rule, eligibility, cap N=3 -----------------------------
+unset CLAUDE_PROJECT_DIR
+
+# N1: five journals - two bench (recall/distill), three normal, distinct started, out-of-order
+# filenames - prints the three normal paths oldest-first by started, skip+lock counts, both
+# bench files moved.
+Q1="$T/n1-queue"
+mkdir -p "$Q1/.litopys/raw"
+mkjournal "$Q1/.litopys/raw/z-first.md" "n1z1n1z1-1111-2222-3333-444455556666" "2026-09-10T08:00:00Z" "do first" closed
+mkjournal "$Q1/.litopys/raw/a-second.md" "n1a2n1a2-1111-2222-3333-444455556666" "2026-09-12T08:00:00Z" "do second" closed
+mkjournal "$Q1/.litopys/raw/m-third.md" "n1m3n1m3-1111-2222-3333-444455556666" "2026-09-14T08:00:00Z" "do third" closed
+cp "$FIX/raw-bench.md" "$Q1/.litopys/raw/bench-a.md"
+mkjournal "$Q1/.litopys/raw/bench-b.md" "n1bbn1bb-1111-2222-3333-444455556666" "2026-09-11T08:00:00Z" \
+  "/litopys:distill record --journal x --body y" closed
+export CLAUDE_PROJECT_DIR="$Q1"
+out="$(bash "$CLI" distill next 2>"$T/n1.err")"; rc=$?
+eq "N1 distill next exits 0" "0" "$rc"
+exp="$Q1/.litopys/raw/z-first.md
+$Q1/.litopys/raw/a-second.md
+$Q1/.litopys/raw/m-third.md"
+eq "N1 prints the three normal paths oldest-first by started, not filename" "$exp" "$out"
+eq "N1 stderr: skipped 2 pending 3 selected 3" "skipped 2 · pending 3 · selected 3" "$(cat "$T/n1.err")"
+if [ -f "$Q1/.litopys/raw/skipped/bench-a.md" ] && [ -f "$Q1/.litopys/raw/skipped/bench-b.md" ]; then
+  echo "  ok    N1 both bench journals moved to skipped/"
+else bad "N1 bench journals not both in skipped/"; fi
+if [ -f "$Q1/.litopys/distill.lock/owner" ]; then echo "  ok    N1 lock owner file exists"
+else bad "N1 no lock owner file"; fi
+
+# N2: --max 1 vs the default cap on four eligible journals
+mk4() { # mk4 <dir> - four eligible normal journals with distinct started
+  mkdir -p "$1/.litopys/raw"
+  mkjournal "$1/.litopys/raw/j1.md" "n2j1n2j1-1111-2222-3333-444455556666" "2026-09-01T08:00:00Z" "one" closed
+  mkjournal "$1/.litopys/raw/j2.md" "n2j2n2j2-1111-2222-3333-444455556666" "2026-09-02T08:00:00Z" "two" closed
+  mkjournal "$1/.litopys/raw/j3.md" "n2j3n2j3-1111-2222-3333-444455556666" "2026-09-03T08:00:00Z" "three" closed
+  mkjournal "$1/.litopys/raw/j4.md" "n2j4n2j4-1111-2222-3333-444455556666" "2026-09-04T08:00:00Z" "four" closed
+}
+Q2="$T/n2-max1"; mk4 "$Q2"
+export CLAUDE_PROJECT_DIR="$Q2"
+out="$(bash "$CLI" distill next --max 1 2>"$T/n2.err")"
+eq "N2 --max 1 prints one path" "$Q2/.litopys/raw/j1.md" "$out"
+eq "N2 --max 1 stderr: pending 4 selected 1" "skipped 0 · pending 4 · selected 1" "$(cat "$T/n2.err")"
+
+Q3="$T/n2-cap"; mk4 "$Q3"
+export CLAUDE_PROJECT_DIR="$Q3"
+out="$(bash "$CLI" distill next 2>"$T/n3.err")"
+exp="$Q3/.litopys/raw/j1.md
+$Q3/.litopys/raw/j2.md
+$Q3/.litopys/raw/j3.md"
+eq "N2 default cap prints three of four eligible" "$exp" "$out"
+eq "N2 default cap stderr: pending 4 selected 3" "skipped 0 · pending 4 · selected 3" "$(cat "$T/n3.err")"
+
+# N3: an open session (last header ## user) is pending, not printed, until its mtime ages past
+# 60 minutes; a journal with no ## user block at all is treated as normal (not skipped).
+Q4="$T/n4-open"
+mkdir -p "$Q4/.litopys/raw"
+mkjournal "$Q4/.litopys/raw/open.md" "n4open01-1111-2222-3333-444455556666" "2026-09-05T08:00:00Z" "still going" open
+printf -- '---\nlitopys: raw\nversion: 1\nsession_id: n4nouser1-1111-2222-3333-444455556666\nstarted: 2026-09-05T08:00:00Z\ncwd: /host/project\nbranch: main\n---\n\n## closed · 2026-09-05T08:10:00Z · other\n' \
+  > "$Q4/.litopys/raw/nouser.md"
+export CLAUDE_PROJECT_DIR="$Q4"
+out="$(bash "$CLI" distill next 2>"$T/n4.err")"
+eq "N3 fresh open session withheld; user-less journal is normal and eligible" \
+  "$Q4/.litopys/raw/nouser.md" "$out"
+eq "N3 stderr: pending 2 selected 1" "skipped 0 · pending 2 · selected 1" "$(cat "$T/n4.err")"
+if [ -f "$Q4/.litopys/raw/open.md" ]; then echo "  ok    N3 open-session journal untouched"
+else bad "N3 open-session journal moved"; fi
+rm -rf "$Q4/.litopys/distill.lock"
+touch -d '61 minutes ago' "$Q4/.litopys/raw/open.md"
+out2="$(bash "$CLI" distill next 2>/dev/null)"
+printf '%s' "$out2" | expect "N3 open session printed once its mtime ages past 60 minutes" "open.md"
+
+# N4: a mid-file ## closed followed by more blocks, ending in a final ## closed, is eligible
+# and printed once - one file, one session (C13).
+Q5="$T/n5-resume"
+mkdir -p "$Q5/.litopys/raw"
+cp "$FIX/raw-resume.md" "$Q5/.litopys/raw/$SID.md"
+export CLAUDE_PROJECT_DIR="$Q5"
+out="$(bash "$CLI" distill next 2>"$T/n5.err")"
+eq "N4 resumed-then-closed journal is eligible and printed once" "$Q5/.litopys/raw/$SID.md" "$out"
+eq "N4 stderr: pending 1 selected 1" "skipped 0 · pending 1 · selected 1" "$(cat "$T/n5.err")"
+
+# N5: no top-level journals -> exit 0, nothing printed, zero counts, no lock left behind.
+Q6="$T/n6-empty"
+mkdir -p "$Q6"
+export CLAUDE_PROJECT_DIR="$Q6"
+out="$(bash "$CLI" distill next 2>"$T/n6.err")"; rc=$?
+eq "N5 empty project exits 0" "0" "$rc"
+eq "N5 empty project stdout empty" "" "$out"
+eq "N5 empty project stderr all zero" "skipped 0 · pending 0 · selected 0" "$(cat "$T/n6.err")"
+no_file "N5 empty project leaves no lock" "$Q6/.litopys/distill.lock"
+
+# N6: only skippable journals -> moved, then behaves like the empty case.
+Q7="$T/n7-skiponly"
+mkdir -p "$Q7/.litopys/raw"
+cp "$FIX/raw-bench.md" "$Q7/.litopys/raw/bench-only.md"
+export CLAUDE_PROJECT_DIR="$Q7"
+out="$(bash "$CLI" distill next 2>"$T/n7.err")"
+eq "N6 skip-only project stdout empty" "" "$out"
+eq "N6 skip-only project stderr" "skipped 1 · pending 0 · selected 0" "$(cat "$T/n7.err")"
+if [ -f "$Q7/.litopys/raw/skipped/bench-only.md" ]; then echo "  ok    N6 skip-only journal moved"
+else bad "N6 skip-only journal not moved"; fi
+no_file "N6 skip-only project leaves no lock" "$Q7/.litopys/distill.lock"
+
+# N7: a fresh lock refuses a second run; a 31-minute-old lock is reclaimed.
+Q9="$T/n8-lock"
+mkdir -p "$Q9/.litopys/raw"
+mkjournal "$Q9/.litopys/raw/lk.md" "n8lkn8lk-1111-2222-3333-444455556666" "2026-09-06T08:00:00Z" "lock test" closed
+export CLAUDE_PROJECT_DIR="$Q9"
+out1="$(bash "$CLI" distill next 2>/dev/null)"
+eq "N7 first run selects the journal" "$Q9/.litopys/raw/lk.md" "$out1"
+out2="$(bash "$CLI" distill next 2>"$T/n8.err")"; rc2=$?
+eq "N7 second run while lock fresh exits 3" "3" "$rc2"
+eq "N7 second run stdout empty" "" "$out2"
+eq "N7 second run stderr is locked" "locked" "$(cat "$T/n8.err")"
+if [ -f "$Q9/.litopys/raw/lk.md" ]; then echo "  ok    N7 locked run moved no file"
+else bad "N7 locked run moved the journal"; fi
+touch -d '31 minutes ago' "$Q9/.litopys/distill.lock"
+out3="$(bash "$CLI" distill next 2>/dev/null)"
+eq "N7 stale lock reclaimed, run proceeds" "$Q9/.litopys/raw/lk.md" "$out3"
+
+# N8: idempotence with record - once record moves a printed journal to done/, next stops
+# listing it.
+Q8="$(newproj n9-idempotence)"
+export CLAUDE_PROJECT_DIR="$Q8"
+out1="$(LITOPYS_NOW="$NOW" bash "$CLI" distill next 2>/dev/null)"
+printf '%s' "$out1" | expect "N8 setup: next lists the queued journal" "$SID"
+rm -rf "$Q8/.litopys/distill.lock"
+LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q8/.litopys/raw/$SID.md" \
+  --body "$FIX/distill-body.md" > /dev/null 2>&1
+out2="$(LITOPYS_NOW="$NOW" bash "$CLI" distill next 2>/dev/null)"
+printf '%s' "$out2" | refute "N8 next no longer lists the journal record already moved to done/" "$SID"
 
 if [ -s "$FAILED" ]; then
   echo "distill.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"

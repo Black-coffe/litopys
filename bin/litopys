@@ -26,6 +26,9 @@ litopys $VERSION
                          [--source live|backfill] [--model <m>] [--force]
       Turn one raw journal plus one distilled body into docs/chronicle/sessions/<date>-<sid8>.md,
       append one session line to the monthly chronicle, move the journal to .litopys/raw/done/.
+  litopys distill next [--max N]
+      Take the distill.lock mutex (stale after 30 minutes), move bench journals to
+      .litopys/raw/skipped/, print up to N (default 3) eligible journal paths oldest first.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
@@ -532,12 +535,159 @@ RECORD
   return 0
 }
 
+# --- distill next (C12) ---------------------------------------------------------------------
+# The lock's mutex, the skip rule and the eligibility/cap logic. No git, no commit; the lock is
+# released here only when nothing was selected - `distill finish` (story 05) releases it
+# otherwise.
+
+journal_scan() { # journal_scan <file> - prints "started<US>firstuser<US>lastheader" (US = \x1f,
+                  # not tab: bash `read` collapses consecutive IFS-whitespace delimiters, which
+                  # would silently swallow an empty field - journals with no `## user` block
+                  # need that middle field to stay empty and stay a field.
+  local file="$1" fm=0 line key val started="" firstuser="" lastheader="" inuser=0 seen=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
+    if [ "$fm" -eq 1 ]; then
+      if [ "$line" = "---" ]; then fm=2; continue; fi
+      key="${line%%:*}"; val="$(trim "${line#*:}")"
+      case "$key" in started) started="$val" ;; esac
+      continue
+    fi
+    case "$line" in
+      '## '*)
+        lastheader="$line"
+        if [ "$seen" -eq 0 ]; then
+          case "$line" in '## user'*) inuser=1 ;; *) inuser=0 ;; esac
+        else
+          inuser=0
+        fi
+        continue
+        ;;
+    esac
+    if [ "$inuser" -eq 1 ] && [ "$seen" -eq 0 ] && [ -n "$(trim "$line")" ]; then
+      firstuser="$line"
+      seen=1
+      inuser=0
+    fi
+  done < "$file"
+  printf '%s\x1f%s\x1f%s\n' "$started" "$firstuser" "$lastheader"
+}
+
+distill_next() {
+  local max=3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --max)
+        if [ $# -lt 2 ]; then
+          echo "litopys distill next: --max needs a value" >&2; usage; return 2
+        fi
+        max="$2"; shift 2 ;;
+      *) echo "litopys distill next: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+  case "$max" in
+    ''|*[!0-9]*|0) echo "litopys distill next: --max must be a positive integer (got '$max')" >&2; usage; return 2 ;;
+  esac
+
+  local root raw lock
+  root="$(project_root)"
+  raw="$root/.litopys/raw"
+  lock="$root/.litopys/distill.lock"
+
+  # --- the mutex: mkdir is atomic on every shell; a 30-minute-old lock dir is reclaimed once ---
+  mkdir -p "$root/.litopys" 2>/dev/null || true
+  if ! mkdir "$lock" 2>/dev/null; then
+    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+      rm -rf "$lock" 2>/dev/null || true
+    fi
+    if ! mkdir "$lock" 2>/dev/null; then
+      echo "locked" >&2
+      return 3
+    fi
+  fi
+  printf '%s %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$lock/owner" 2>/dev/null || true
+
+  mkdir -p "$raw" 2>/dev/null || true
+  mkdir -p "$raw/skipped" 2>/dev/null || true
+  if ! [ -f "$root/.litopys/.gitignore" ]; then
+    mkdir -p "$root/.litopys" 2>/dev/null || true
+    printf '*\n' > "$root/.litopys/.gitignore" 2>/dev/null || true
+  fi
+
+  local -a files=() remain=()
+  local f
+  for f in "$raw"/*.md; do
+    [ -f "$f" ] || continue
+    files+=("$f")
+  done
+
+  # --- skip rule: bench journals move to skipped/, never distilled -------------------------
+  local skipped=0 started firstuser lastheader
+  for f in ${files[@]+"${files[@]}"}; do
+    IFS=$'\x1f' read -r started firstuser lastheader < <(journal_scan "$f")
+    case "$firstuser" in
+      /litopys:recall*|/litopys:distill*)
+        if mv -f "$f" "$raw/skipped/$(basename "$f")" 2>/dev/null; then
+          skipped=$((skipped + 1))
+        else
+          remain+=("$f")
+        fi
+        ;;
+      *) remain+=("$f") ;;
+    esac
+  done
+  local pending=${#remain[@]}
+
+  # --- eligibility + oldest-first order, by `started` (file mtime when absent) -------------
+  local epoch eligible tmplist=""
+  for f in ${remain[@]+"${remain[@]}"}; do
+    IFS=$'\x1f' read -r started firstuser lastheader < <(journal_scan "$f")
+    epoch=""
+    if [ -n "$started" ]; then
+      epoch="$(date -u -d "$started" +%s 2>/dev/null || true)"
+    fi
+    if [ -z "$epoch" ]; then
+      epoch="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    fi
+    eligible=0
+    case "$lastheader" in
+      '## closed'*) eligible=1 ;;
+      *) if [ -n "$(find "$f" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then eligible=1; fi ;;
+    esac
+    tmplist="$tmplist$epoch\t$eligible\t$f\n"
+  done
+
+  local -a selected=()
+  local sepoch selig sfile
+  while IFS=$'\t' read -r sepoch selig sfile; do
+    [ -n "$sfile" ] || continue
+    if [ "$selig" -eq 1 ] && [ "${#selected[@]}" -lt "$max" ]; then
+      selected+=("$sfile")
+    fi
+  done < <(printf '%b' "$tmplist" | sort -n -t $'\t' -k1,1)
+
+  local k=${#selected[@]}
+  for f in ${selected[@]+"${selected[@]}"}; do
+    printf '%s\n' "$f"
+  done
+  echo "skipped $skipped · pending $pending · selected $k" >&2
+
+  # --- the lock releases itself only when nothing was selected; `distill finish` releases it
+  # otherwise (C12) ----------------------------------------------------------------------------
+  if [ "$k" -eq 0 ]; then
+    rm -rf "$lock" 2>/dev/null || true
+  fi
+  return 0
+}
+
 cmd_distill() {
   local verb="${1:-}"
   [ $# -gt 0 ] && shift
   case "$verb" in
     record) distill_record "$@"; return $? ;;
-    "") echo "litopys distill: a verb is required (record)" >&2; usage; return 2 ;;
+    next) distill_next "$@"; return $? ;;
+    "") echo "litopys distill: a verb is required (record, next)" >&2; usage; return 2 ;;
     *) echo "litopys distill: unknown verb '$verb'" >&2; usage; return 2 ;;
   esac
 }

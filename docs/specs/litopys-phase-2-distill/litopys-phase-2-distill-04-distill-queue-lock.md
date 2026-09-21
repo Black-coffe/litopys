@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-04
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -52,5 +52,25 @@ blocked_by: [litopys-phase-2-distill-01]
 `bash tests/distill.test.sh`
 
 ## Implementation notes
+- Files: `bin/litopys` (`journal_scan()`, `distill_next()`, `next` case arm in `cmd_distill`, usage text),
+  `tests/distill.test.sh` (N1-N8 sections + `mkjournal()` helper + fixture checks), `tests/fixtures/raw-bench.md` (new).
+- `journal_scan()` reads frontmatter `started`, the first `## user` block's first content line, and the
+  last `## ` header in one pass; it never looks past that (matches the non-goal).
+- Bug found and fixed: piping `journal_scan`'s three fields through `IFS=$'\t' read` silently collapsed
+  the middle field whenever it was empty (a journal with no `## user` block), because tab is "IFS
+  whitespace" and bash's `read` collapses runs of it - this shifted `lastheader` into an empty slot and
+  made every user-less-but-closed journal look ineligible. Fixed by using `\x1f` (unit separator) instead
+  of tab as the field delimiter, which is not IFS whitespace and preserves empty fields.
+- Second bug: `mkdir "$lock"` failed with "locked" on a brand-new project whose `.litopys/` did not exist
+  yet, because `mkdir` (no `-p`) needs the parent to exist - not because a lock was actually held. Fixed
+  with `mkdir -p "$root/.litopys"` right before the lock attempt.
+- Eligibility/order: all remaining (non-skipped) top-level journals are timestamped (`started` parsed via
+  `date -u -d`, falling back to the file's mtime) and sorted oldest-first with `sort -n`; the eligible
+  subset (last header `## closed`, or mtime `-mmin +60`) is then capped at `--max` (default 3) in that
+  order. `pending` in the stderr line counts every remaining top-level journal (eligible or not), matching
+  the "open session counts as pending" acceptance criterion.
+- `distill next` never moves an eligible normal journal itself (only skip-rule bench journals move, to
+  `skipped/`); a journal stays visible to repeated `next` calls until `distill record` (or story 05's
+  `finish`) moves it to `done/` - verified directly (N8).
 
 ## Findings
