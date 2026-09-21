@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-0-1-06
 spec: litopys-phase-0-1
-status: todo
-returned: NEEDS_CONTEXT
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -52,6 +52,9 @@ Contract C8 in plan.md (what the journal is supposed to contain). Grill brief Ac
 `test -s docs/specs/litopys-phase-0-1/recon/raw-vs-export.md && grep -q '^## Losses' docs/specs/litopys-phase-0-1/recon/raw-vs-export.md && grep -q '^## Verdict' docs/specs/litopys-phase-0-1/recon/raw-vs-export.md`
 
 ## Implementation notes
+- Re-checked inputs on 2026-09-21 (third pass): `E:/Projects/vulyk/.litopys/raw/a10ea931-a24f-4942-aa20-743c4eeb9e4a.md` and `E:/Projects/vulyk/.litopys/export-a10ea931.md` now exist (plus a `.pty.log` sidecar capturing raw terminal escape sequences), matching the session id and turn structure the Inputs section names. Verified authenticity via the pty log's resume banner (`claude --resume a10ea931-…`) and the literal `/export`/`/exit` command echoes, rather than trusting file presence alone.
+- Wrote `docs/specs/litopys-phase-0-1/recon/raw-vs-export.md` per the acceptance criteria: Header, Losses (6 items, one flagged inconclusive-for-this-session, one flagged not-applicable-to-this-session, both said explicitly rather than invented), Kept (4 items), Verdict with 3 phase-2 payload/hook suggestions.
+- Did not touch hooks or journal format code (non-goal); did not read any `~/.claude/projects/*.jsonl` transcript; quoted only short excerpts, cited by file:line/turn instead of pasting blocks.
 
 ## Findings
 No ≥100k-token real session or `/export` file exists yet. The only raw journal on disk is `E:/Projects/vulyk/.litopys/raw/ac90b6ae-a213-4a9e-9330-f5d3c443b7c0.md` (339 bytes, 16 lines), a smoke test ("Say exactly: litopys hook smoke test"), not a real ≥100k-token VULYK session. No `/export` file was found anywhere under E:/Projects. Per the story's "Needs a human first" precondition, I cannot run the session myself. Please: run one real VULYK session past 100k tokens with `claude --plugin-dir E:/Projects/litopys`, `/export` it to a file, and give me both paths (the journal under `E:/Projects/vulyk/.litopys/raw/<session_id>.md` and the export file) plus the session's reported token count.
