@@ -8,3 +8,4 @@
 - 2026-09-21T16:09:24Z · 04-council:open · round 1 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-2-distill/round-1 · next: dispatch:haiku,sonnet,opus,review
 - 2026-09-21T16:26:14Z · 04-council:RED · round 1 verdict RED at 46ad0f2 pack d1994a26f56c · next: repair
 - 2026-09-21T16:46:08Z · 03-building · wave 5 closed, gate A re-run · next: story 08 closed by hand after a Commands-cell mismatch (inner backticks); distill re-run in VULYK: 0 distilled, 6 skipped, no fragment; relaunching for round 2
+- 2026-09-21T16:46:37Z · 04-council:open · round 2 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-2-distill/round-2 · next: dispatch:haiku,sonnet,opus,review
