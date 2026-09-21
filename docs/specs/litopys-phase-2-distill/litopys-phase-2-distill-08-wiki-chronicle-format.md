@@ -1,7 +1,7 @@
 ---
 story: litopys-phase-2-distill-08
 spec: litopys-phase-2-distill
-status: todo
+status: done
 returned: DONE
 tier: 3
 worker: worker-code
