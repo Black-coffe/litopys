@@ -198,3 +198,4 @@ The six lines below are the cycle's confirmation artifacts (docs/cycle.md); scri
 **Council:** RED round 1, 2026-09-21, at 46ad0f2, pack d1994a26f56c
 **Council:** GREEN round 2, 2026-09-21, at 3ee35ba, pack 0a6d59a43148
 **Shipped:**
+**Shipped:** 0.2.0, 2026-09-21, at a999750 - merged to main, published by the Queen on the owner's authorisation
