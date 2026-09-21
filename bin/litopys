@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# litopys CLI - deterministic chronicle writer, no model, no tokens.
+#
+#   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
+#          bash bin/litopys bench
+#          bash bin/litopys --version | help
+#
+# Invoked as `bash "${CLAUDE_PLUGIN_ROOT}/bin/litopys" <sub>` (C2) so Windows never
+# depends on PATH exec of an extension-less file.
+#
+# `append` mirrors VULYK's scripts/journal.sh: create-with-header-if-missing, append one
+# line, print the same line to stdout. After argument validation it is never a gate - a
+# chronicle record that cannot be written must not break the caller that wanted to write it.
+set -u
+
+VERSION="0.1.0"
+KINDS="grill brief verdict ship handoff note"
+
+usage() {
+  cat >&2 <<EOF
+litopys $VERSION
+  litopys append --kind <$(echo "$KINDS" | tr ' ' '|')> --ref <path|sha> [--note "<text>"]
+      Append one dated line to <root>/docs/chronicle/YYYY-MM.md. Idempotent on (ts, kind, ref).
+  litopys bench
+      Ask every question in <root>/docs/chronicle/golden-questions.md through
+      /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
+  litopys --version       Print $VERSION.
+  litopys help            This text.
+
+Environment: CLAUDE_PROJECT_DIR (project root override), LITOPYS_NOW (UTC ISO clock override),
+LITOPYS_CLAUDE (claude binary used by bench), CLAUDE_PLUGIN_ROOT (this plugin's root).
+EOF
+}
+
+# C1 - project root: CLAUDE_PROJECT_DIR, then git toplevel, then \$PWD.
+project_root() {
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR:-}" ]; then
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
+    return 0
+  fi
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$top" ] && [ -d "$top" ]; then
+    printf '%s\n' "$top"
+    return 0
+  fi
+  printf '%s\n' "$PWD"
+}
+
+cmd_append() {
+  local kind="" ref="" note=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --kind|--ref|--note)
+        if [ $# -lt 2 ]; then
+          echo "litopys append: $1 needs a value" >&2; usage; return 2
+        fi
+        case "$1" in
+          --kind) kind="$2" ;;
+          --ref)  ref="$2" ;;
+          --note) note="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) echo "litopys append: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+
+  if [ -z "$kind" ]; then
+    echo "litopys append: --kind is required" >&2; usage; return 2
+  fi
+  case " $KINDS " in
+    *" $kind "*) : ;;
+    *) echo "litopys append: --kind must be one of: $KINDS" >&2; usage; return 2 ;;
+  esac
+  if [ -z "$ref" ]; then
+    echo "litopys append: --ref is required" >&2; usage; return 2
+  fi
+
+  local root ts month file prefix line found
+  root="$(project_root)"
+  ts="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  month="$(printf '%s' "$ts" | cut -c1-7)"
+
+  # Secrets never reach a committed chronicle line; redact.sh is a passthrough filter that
+  # always exits 0, so its absence costs the note nothing (C3).
+  if [ -n "$note" ] && [ -f "$root/scripts/redact.sh" ]; then
+    note="$(printf '%s\n' "$note" | bash "$root/scripts/redact.sh" 2>/dev/null || printf '%s' "$note")"
+  fi
+  # One record = one line: newlines, carriage returns and tabs collapse to spaces.
+  note="$(printf '%s' "$note" | tr '\n\r\t' '   ')"
+
+  file="$root/docs/chronicle/$month.md"
+  if [ ! -f "$file" ]; then
+    mkdir -p "$root/docs/chronicle" || { echo "litopys append: cannot create $root/docs/chronicle" >&2; return 0; }
+    printf '# Chronicle %s\n\n' "$month" > "$file"
+  fi
+
+  prefix="- $ts · $kind · $ref · "
+  line="$prefix$note"
+  found="$(awk -v p="$prefix" 'index($0, p) == 1 { print; exit }' "$file" 2>/dev/null || true)"
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+
+  printf '%s\n' "$line" >> "$file"
+  printf '%s\n' "$line"
+  return 0
+}
+
+trim() { # trim <string> - strip leading and trailing whitespace
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# C5 token extraction. `claude -p --output-format json` reports the input side in three fields
+# and a forked skill's *uncached* `input_tokens` is a couple of tokens while cache creation and
+# cache read carry the actual spend (live probe: input 2, cache_creation 50520, cache_read 0,
+# output 4) - reading the uncached slice alone made every real baseline row read 0 (round-1
+# seat, Ask 4). So `tokens_in` is the sum of all three. `modelUsage` is the same information
+# per model in camelCase; it is the fallback when a top-level `usage` object exists but is
+# all-zero. `null` is written only when neither object is present at all.
+BENCH_USAGE_JQ='
+def num($v): if ($v | type) == "number" then $v else 0 end;
+def tin($u):  num($u.input_tokens)  + num($u.cache_creation_input_tokens) + num($u.cache_read_input_tokens)
+            + num($u.inputTokens)   + num($u.cacheCreationInputTokens)    + num($u.cacheReadInputTokens);
+def tout($u): num($u.output_tokens) + num($u.outputTokens);
+(if (.usage | type) == "object" then {i: tin(.usage), o: tout(.usage)} else null end) as $top
+| (if (.modelUsage | type) == "object"
+   then (.modelUsage | to_entries | map(.value))
+        | {i: (map(tin(.)) | add // 0), o: (map(tout(.)) | add // 0)}
+   else null end) as $mod
+| (if   $top != null and ($top.i + $top.o) > 0 then $top
+   elif $mod != null and ($mod.i + $mod.o) > 0 then $mod
+   elif $top != null then $top
+   else $mod end) as $u
+| [ (if $u == null then "null" else ($u.i | tostring) end),
+    (if $u == null then "null" else ($u.o | tostring) end),
+    (.total_cost_usd // null | tostring) ] | @tsv'
+
+# `bench` is a manual/CLI mode: it must never read stdin, or a terminal run with an open pipe
+# would block forever (VULYK's handoff.py "manual modes must NOT read stdin" bug). Every
+# child process that could inherit the terminal gets </dev/null.
+cmd_bench() {
+  if [ $# -gt 0 ]; then
+    echo "litopys bench: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+  if ! command -v jq > /dev/null 2>&1; then
+    echo "litopys bench: jq not found - bench parses claude's JSON output with jq" >&2; return 2
+  fi
+
+  local root qfile plugin_root
+  root="$(project_root)"
+  qfile="$root/docs/chronicle/golden-questions.md"
+  plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+  if [ ! -f "$qfile" ]; then
+    echo "litopys bench: no golden questions at $qfile" >&2; return 2
+  fi
+
+  # --- C4 parse: five '## Q<n> ·' sections, each with answer: and refs: ---------------------
+  local -a qid qtext qans qrefs
+  local n=0 line rest
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      '## Q'*)
+        n=$((n + 1))
+        rest="${line#'## '}"
+        qid[$n]="${rest%% *}"
+        case "$rest" in
+          *' · '*) qtext[$n]="$(trim "${rest#* · }")" ;;
+          *)       qtext[$n]="" ;;
+        esac
+        qans[$n]=""
+        qrefs[$n]=""
+        ;;
+      '- answer:'*) if [ "$n" -gt 0 ]; then qans[$n]="$(trim "${line#- answer:}")"; fi ;;
+      '- refs:'*)   if [ "$n" -gt 0 ]; then qrefs[$n]="$(trim "${line#- refs:}")"; fi ;;
+    esac
+  done < "$qfile"
+
+  local bad="" i
+  if [ "$n" -ne 5 ]; then
+    bad="expected exactly five '## Q<n> ·' sections, found $n"
+  else
+    for i in 1 2 3 4 5; do
+      case "${qid[$i]:-}" in
+        Q[0-9]*) : ;;
+        *) bad="section $i is not '## Q<n> · <question>'"; break ;;
+      esac
+      if [ -z "${qtext[$i]:-}" ]; then bad="${qid[$i]} has no question text after ' · '"; break; fi
+      if [ -z "${qans[$i]:-}" ];  then bad="${qid[$i]} has no 'answer:' keyphrases"; break; fi
+      if [ -z "${qrefs[$i]:-}" ]; then bad="${qid[$i]} has no 'refs:'"; break; fi
+    done
+  fi
+  if [ -n "$bad" ]; then
+    echo "litopys bench: malformed $qfile - $bad" >&2; return 2
+  fi
+
+  # --- C1: .litopys/ exists and ignores itself before anything is written -------------------
+  if ! mkdir -p "$root/.litopys"; then
+    echo "litopys bench: cannot create $root/.litopys" >&2; return 2
+  fi
+  [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
+
+  local out_file="$root/.litopys/baseline.jsonl"
+  local claude_bin="${LITOPYS_CLAUDE:-claude}"
+  local project ts errfile
+  project="$(basename "$root")"
+  ts="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.bench-stderr")"
+
+  local hits=0 refs_hit=0 refs_exp=0 total=0
+  local -a keys refs
+  local out rc res started ended secs kp ref matched nkeys nrefs err meta ti to cost hit k row
+  local is_err failed
+  for i in 1 2 3 4 5; do
+    IFS='|' read -r -a keys <<< "${qans[$i]}"
+    IFS=';' read -r -a refs <<< "${qrefs[$i]}"
+
+    : > "$errfile"
+    started="$(date +%s)"
+    out="$(cd "$root" && "$claude_bin" -p --plugin-dir "$plugin_root" --model sonnet \
+      --output-format json "/litopys:recall ${qtext[$i]}" 2>"$errfile" < /dev/null)"
+    rc=$?
+    ended="$(date +%s)"
+    secs=$((ended - started))
+    [ "$secs" -ge 0 ] || secs=0
+    total=$((total + secs))
+
+    res="$(printf '%s' "$out" | jq -r '.result // ""' 2>/dev/null || true)"
+    meta="$(printf '%s' "$out" | jq -r "$BENCH_USAGE_JQ" 2>/dev/null || true)"
+    IFS=$'\t' read -r ti to cost <<< "$meta"
+    ti="${ti:-null}"; to="${to:-null}"; cost="${cost:-null}"
+
+    # A call is failed if claude exited non-zero OR answered with "is_error":true - the latter
+    # is an error report in the result field, never an answer, and must not be scored as one.
+    is_err="$(printf '%s' "$out" | jq -r 'if (.is_error == true) then 1 else 0 end' 2>/dev/null || true)"
+    failed=0
+    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ]; then failed=1; fi
+
+    hit=false
+    nkeys=0
+    if [ "$failed" -eq 0 ]; then
+      for k in "${keys[@]}"; do
+        kp="$(trim "$k")"
+        [ -n "$kp" ] || continue
+        nkeys=$((nkeys + 1))
+        if printf '%s' "$res" | grep -qiF -- "$kp"; then hit=true; break; fi
+      done
+    fi
+
+    matched=0
+    nrefs=0
+    for k in "${refs[@]}"; do
+      ref="$(trim "$k")"
+      [ -n "$ref" ] || continue
+      nrefs=$((nrefs + 1))
+      if [ "$failed" -eq 0 ] && printf '%s' "$res" | grep -qF -- "$ref"; then
+        matched=$((matched + 1))
+      fi
+    done
+
+    [ "$hit" = true ] && hits=$((hits + 1))
+    refs_hit=$((refs_hit + matched))
+    refs_exp=$((refs_exp + nrefs))
+
+    row="$(jq -cn --arg ts "$ts" --arg project "$project" --arg q "${qid[$i]}" \
+      --arg question "${qtext[$i]}" --argjson hit "$hit" --argjson refs_expected "$nrefs" \
+      --argjson refs_matched "$matched" --argjson tokens_in "$ti" --argjson tokens_out "$to" \
+      --argjson cost_usd "$cost" --argjson seconds "$secs" --arg model sonnet \
+      --arg litopys "$VERSION" \
+      '{ts:$ts,project:$project,q:$q,question:$question,hit:$hit,refs_expected:$refs_expected,refs_matched:$refs_matched,tokens_in:$tokens_in,tokens_out:$tokens_out,cost_usd:$cost_usd,seconds:$seconds,model:$model,litopys:$litopys}')"
+
+    if [ "$failed" -eq 1 ]; then
+      if [ "$rc" -ne 0 ]; then
+        err="$(head -n 1 "$errfile" 2>/dev/null || true)"
+        [ -n "$err" ] || err="$(printf '%s' "$out" | head -n 1)"
+        [ -n "$err" ] || err="claude exited $rc"
+      else
+        err="$(printf '%s' "$res" | head -n 1)"
+        [ -n "$err" ] || err="is_error"
+      fi
+      row="$(printf '%s' "$row" | jq -c --arg error "$err" '. + {error:$error}')"
+    fi
+    printf '%s\n' "$row" >> "$out_file"
+  done
+  rm -f "$errfile" 2>/dev/null || true
+
+  echo "hits $hits/5 · refs $refs_hit/$refs_exp · ${total}s"
+  return 0
+}
+
+SUB="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$SUB" in
+  append) cmd_append "$@"; exit $? ;;
+  bench) cmd_bench "$@"; exit $? ;;
+  --version|-v|version) echo "$VERSION"; exit 0 ;;
+  help|--help|-h) usage; exit 0 ;;
+  *) echo "litopys: unknown subcommand '$SUB'" >&2; usage; exit 2 ;;
+esac

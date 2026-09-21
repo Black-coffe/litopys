@@ -14,3 +14,7 @@ __pycache__/
 .vulyk/
 docs/specs/*/PAUSE
 docs/specs/*/DRIVER
+
+# --- litopys runtime artifacts ---
+# Per-machine benchmark and cache output; never a second account of the chronicle.
+.litopys/

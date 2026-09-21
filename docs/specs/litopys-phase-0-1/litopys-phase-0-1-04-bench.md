@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-0-1-04
 spec: litopys-phase-0-1
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: opus
@@ -49,5 +49,14 @@ Contracts C1, C2, C4, C5, C6 in plan.md. `recon/vulyk-hooks.md` "manual modes mu
 `bash tests/bench.test.sh`
 
 ## Implementation notes
+- `bin/litopys`: `cmd_bench` + a `trim` helper added; dispatcher `bench)` now calls it. `append` untouched, `project_root` (C1) shared as planned.
+- Parser is pure bash string ops over the C4 file; jq is used only for reading claude's JSON and for building each row (`jq -cn --argjson ...`), so a row can never be malformed JSON. `bench` exits 2 with one stderr line when jq is absent.
+- Manual mode discipline: `bench` reads no stdin and passes `< /dev/null` to the `claude` child; `tests/bench.test.sh` proves it with a fifo whose writer stays open (fails the assertion after 10s rather than hanging forever).
+- Fixture stub logs `cwd` + argv to `$LITOPYS_STUB_LOG`, which is how the test asserts the exact invocation form (`-p --plugin-dir <root> --model sonnet --output-format json "/litopys:recall <q>"`) and that cwd is the project root.
+- `tests/fixtures/claude-stub.sh` is mode 100755 in the git index (`git update-index --chmod=+x`) - `bench` execs it directly, so a clone on Linux needs the bit.
+- Summary on the fixture is `hits 3/5 · refs 5/8` (Q1/Q2/Q5 hit, Q3 miss, Q4 = stub exit 1 -> `hit:false` + `error`), not 4/5: a failed call is never a hit.
+- **AC 7 (manual run in E:/Projects/vulyk) not performed.** It contradicts Non-goal 4 ("Do not run the real bench in E:/Projects/vulyk from inside the build - the Queen or owner does that after the story closes"), and the prerequisite does not exist: `E:/Projects/vulyk/docs/chronicle/` is absent, so the owner has not yet copied `examples/vulyk/golden-questions.md` there. Which invocation form works against a real `claude` (slash command vs `--agent litopys:recall` fallback) is therefore still unverified - it is the baseline gate's first question.
 
 ## Findings
+- Open question for the planner/Queen: AC 7 and Non-goal 4 of this story ask for opposite things. Resolved in favour of the Non-goal (the plan's wave-3/4 gate also assigns the real run to the owner). If the slash form fails in `claude -p`, the one-line change is the invocation in `cmd_bench` plus the `slash command form` assertion in `tests/bench.test.sh`.
+- Queen note after the real run (2026-09-21, E:/Projects/vulyk): `hits 5/5 · refs 7/9 · 140s`, 5 rows, slash-command form worked. Every row has `tokens_in: 0`, `tokens_out: 0` while `cost_usd` is non-zero: `usage.input_tokens` in `claude -p` JSON is the uncached slice only (2 tokens in a probe); the bulk sits in `cache_creation_input_tokens`/`cache_read_input_tokens`. bench implements C5 as written; C5 itself needs the cache fields in phase 2.

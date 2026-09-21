@@ -1,0 +1,6 @@
+{"hooks":{
+ "UserPromptSubmit":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/raw-journal.sh\" prompt","timeout":10}]}],
+ "Stop":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/raw-journal.sh\" stop","timeout":10}]}],
+ "SessionEnd":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/raw-journal.sh\" end"}]}],
+ "SessionStart":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"","timeout":10}]}]
+}}

@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-0-1-05
 spec: litopys-phase-0-1
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: opus
@@ -50,5 +50,11 @@ Contracts C1, C7, C8, C9 in plan.md. `recon/vulyk-hooks.md`: additionalContext J
 `bash tests/hooks.test.sh`
 
 ## Implementation notes
+- Files: `hooks/hooks.json` (C7 verbatim), `hooks/raw-journal.sh` (prompt/stop/end), `hooks/session-start.sh`, `tests/hooks.test.sh`. Nothing else touched - manifest, `bin/litopys`, `.gitignore` untouched (the repo `.gitignore` already lists `.litopys/`).
+- Branch detection uses `git symbolic-ref --short HEAD` with `rev-parse --abbrev-ref HEAD` as the fallback: on a branch with no commits yet `rev-parse` prints the literal `HEAD` and exits 128, which the test caught.
+- `end` is a single `printf >>` into an existing file - no git, no mkdir, no scan - so it fits SessionEnd's 1.5 s budget; the test asserts both the wall clock and that `journal_end()` contains exactly one `>>`.
+- Fail-open proof: every mode exits 0 on malformed/empty/non-object stdin, on a missing `cwd`, when `.litopys` cannot be created (simulated by making `.litopys` a regular file - portable, unlike chmod on Windows), and with `PATH` emptied so `jq` is absent. The jq check is the first external lookup in both scripts, so an empty PATH is a silent no-op; the test invokes bash by absolute path for those cases.
+- Banner version is read from `.claude-plugin/plugin.json` with a `0.1.0` fallback, so the C9 line cannot drift from the manifest.
+- Manual check (acceptance 7): `claude -p --plugin-dir E:/Projects/litopys` from `E:/Projects/vulyk` left `.litopys/raw/ac90b6ae-....md` with frontmatter (`cwd: E:\Projects\vulyk`, `branch: main`) plus `## user`, `## assistant` and `## closed · ... · other` blocks; `.litopys/.gitignore` = `*` and `git status` in vulyk shows nothing new. Print mode does not display additionalContext, so the banner was rendered by running `session-start.sh` against that project: 5 lines, `chronicle: docs/chronicle/ (0 files)`, `raw journals: 1`. That smoke-test journal was left in place (gitignored); it counts as one unconsolidated journal there.
 
 ## Findings

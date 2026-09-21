@@ -142,11 +142,14 @@ Quiet variants only: everything these print is resent on every subsequent turn. 
 | Purpose | Command |
 |---|---|
 | Single test file | `bash tests/<name>.test.sh` |
+| Story 01 test | `bash tests/append.test.sh` |
+| Story 04 test | `bash tests/bench.test.sh` |
+| Story 05 test | `bash tests/hooks.test.sh` |
 | Full test suite | `for t in tests/*.test.sh; do bash "$t" \|\| exit 1; done` |
 | Lint | `git ls-files '*.sh' bin/* \| xargs -n1 bash -n && git ls-files '*.json' \| xargs -n1 jq -e . > /dev/null` |
-| Build / typecheck | `claude plugin validate . --strict` |
+| Build / typecheck | `claude plugin validate .` |
 
-Filled in by `/vulyk-bootstrap`. Verify each command actually runs before writing it
+`claude plugin validate .` is deliberately non-strict: `--strict` exits 1 here for good (root CLAUDE.md warning, story 01 of litopys-phase-0-1). Filled in by `/vulyk-bootstrap`. Verify each command actually runs before writing it
 down, and write "none" where this project genuinely lacks one - a verification that
 always exits 0 is worse than an admitted gap.
 <!-- VULYK:COMMANDS:END -->
