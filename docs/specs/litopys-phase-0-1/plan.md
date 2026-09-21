@@ -134,7 +134,7 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 ## Tradeoffs
 - **Separate hook scripts vs routing every event through `bin/litopys hook <event>`.** Chose separate scripts under `hooks/`: `bin/litopys` stays a user CLI with stdin free (VULYK's "hook modes read stdin, manual modes must not" bug). Rejected the single entry point - one file, but a CLI that sometimes blocks on stdin.
 - **jq-required vs python fallback.** Chose jq-only with fail-open; VULYK's own `anomaly-scan.sh` already needs jq, so no host loses anything it had. Rejected python: doubles the code and reintroduces the `pwd -W` path bug.
-- **Golden questions in the VULYK repo vs in litopys.** Chose VULYK's `docs/chronicle/` so `bench` has one rule (read the host project). Rejected a litopys-side copy: two files to drift, and a `--questions` flag nobody asked for.
+- **Golden questions authored in litopys vs written straight into the VULYK repo.** Chose authoring in `examples/vulyk/` and a copy at the baseline gate: every story diff stays in this repo, so scope-check and Law 3 hold. `bench` keeps one rule (read the host project's `docs/chronicle/`). Rejected a cross-repo write: the scope gate would see an empty diff and the Queen would commit story output by hand.
 - **Bench via `claude -p` with a stub in tests vs an in-session skill.** Chose the CLI: tokens, cost and duration are in the JSON output, and the run is reproducible from a terminal. Rejected an in-session `/litopys:bench` skill: no clean token count per question, and it would pollute the measuring session.
 
 ## Descoped
