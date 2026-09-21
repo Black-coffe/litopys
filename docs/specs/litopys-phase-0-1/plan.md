@@ -55,7 +55,7 @@ Turn the empty `litopys` repo into a loadable Claude Code plugin that does two m
 **Wave 8 - fix round 2, lead-review majors 2-3 and minors 6-7 (cut by the Queen on the planner's hand-off in round 2)**
 - `litopys-phase-0-1-10-golden-q4-q5` (sonnet, blocked by 08) - `examples/vulyk/golden-questions.md`: Q4 keyphrases literal in the adversarial grill, Q5 keyphrases true of the retired agent only, Q1 source/ref corrected; nothing sourced from `.litopys/`.
 
-**Gate after wave 8 (Queen, terminal):** re-copy the file to `E:/Projects/vulyk/docs/chronicle/golden-questions.md`, re-run `bash E:/Projects/litopys/bin/litopys bench` in E:/Projects/vulyk, confirm five rows; that run is the phase-0 baseline. Then open round 3. **Run 2026-09-21 ~14:20Z after story 10: `hits 4/5 · refs 7/8 · 143s`, `tokens_in` 146k-370k, `tokens_out` 581-2179 per row, cost 0.11-0.19 USD; this is the phase-0 baseline in `E:/Projects/vulyk/.litopys/baseline.jsonl` (earlier runs kept as `baseline.round1.jsonl`, `baseline.round2.jsonl`). Q4 misses: recall's answer does not contain either grill keyphrase.**
+**Gate after wave 8 (Queen, terminal):** re-copy the file to `E:/Projects/vulyk/docs/chronicle/golden-questions.md`, re-run `bash E:/Projects/litopys/bin/litopys bench` in E:/Projects/vulyk, confirm five rows; that run is the phase-0 baseline. Then open round 3. **Run 2026-09-21 14:01:10Z (row ts) after story 10: `hits 4/5 · refs 7/8 · 143s`, `tokens_in` 146k-370k, `tokens_out` 581-2179 per row, cost 0.11-0.19 USD; this is the phase-0 baseline in `E:/Projects/vulyk/.litopys/baseline.jsonl` (earlier runs kept as `baseline.round1.jsonl`, `baseline.round2.jsonl`). Q4 misses: recall's answer does not contain either grill keyphrase.**
 
 Build agent count: 6 workers (3 opus, 3 sonnet) + full court (`council-sonnet`, `council-opus`, `council-haiku`) + `lead-review` = 10 agent dispatches, plus retries; fix round 1 adds 2 workers (1 opus, 1 sonnet) and one council round; fix round 2 adds 1 worker (sonnet) and one council round.
 
@@ -160,8 +160,6 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 
 ## Descoped
 
-- Review round 2 major 4 / round-1 major 5: `bin/litopys append --ref` containing a newline or the ` · ` separator is not normalised, so a multi-line ref writes a two-line record and defeats (ts, kind, ref) idempotence. Not in fix round 2 (Ask 6 only); the Queen decides between a wave-8 story on `bin/litopys` + `tests/append.test.sh` or a permanent descope line here.
-- Review round 2 minors 6-13 and opus seat UNASKED (a)-(e), plus round-1 minors 9, 12, 13, 14: none named by round 2's unresolved-ask list; each needs either a story or a line here before round 3 - listed for the Queen, not cut by this planner.
 
 - Review round 2 major 4 / round-1 major 5 (`append --ref` with a newline or ` · ` writes a two-line record): descoped to phase 2. In phase 0 every `--ref` comes from the plugin's own callers (skills, hooks, `journal.sh`-style one-liners); no user-facing path produces a multi-line ref. Phase 2's first `append` story normalises `--ref` the way `--note` is (collapse to one line) and adds the test.
 - Review round 1 major 1 / planner's open question (bench sessions are journalled by the plugin's own hooks): decided - no env marker in phase 0/1 (it would touch Ask 5 files for a measurement-only case); phase 2's distiller skips `## user` blocks whose first line starts with `/litopys:recall`, and the banner's raw-journal count is accepted as including them until then.

@@ -78,3 +78,4 @@
 {"v":1,"ts":"2026-09-21T13:32:55Z","code":"scope_breach","value":3,"threshold":0,"vulyk":"0.15.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-phase-0-1-08-golden-keyphrases","ref":"scope:litopys-phase-0-1-08-golden-keyphrases"}
 {"v":1,"ts":"2026-09-21T13:55:29Z","code":"scope_breach","value":3,"threshold":0,"vulyk":"0.15.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-phase-0-1-09-raw-vs-export-losses","ref":"scope:litopys-phase-0-1-09-raw-vs-export-losses"}
 {"v":1,"ts":"2026-09-21T14:04:17Z","code":"scope_breach","value":2,"threshold":0,"vulyk":"0.15.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-phase-0-1-10-golden-q4-q5","ref":"scope:litopys-phase-0-1-10-golden-q4-q5"}
+{"v":1,"ts":"2026-09-21T14:29:55Z","code":"council_rounds_high","value":3,"threshold":3,"vulyk":"0.15.0","tier":3,"model":"","agent":"","spec":"litopys-phase-0-1","story":"","ref":"council:litopys-phase-0-1"}
