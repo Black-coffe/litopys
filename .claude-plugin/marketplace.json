@@ -1,0 +1,15 @@
+{
+  "name": "litopys",
+  "owner": {
+    "name": "Black-coffe"
+  },
+  "description": "litopys - long-term project memory for Claude Code: a dated chronicle of sessions plus a wiki, written without a model call.",
+  "plugins": [
+    {
+      "name": "litopys",
+      "displayName": "Litopys",
+      "description": "Project memory: bin/litopys append writes dated chronicle lines, /litopys:recall answers from git history and docs, four hooks keep a raw per-session journal under .litopys/raw/.",
+      "source": "./"
+    }
+  ]
+}
