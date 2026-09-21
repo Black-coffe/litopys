@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-03
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: opus
@@ -53,5 +53,18 @@ blocked_by: [litopys-phase-2-distill-01]
 `claude plugin validate .`
 
 ## Implementation notes
+- Files: `skills/distill/SKILL.md` (new), `agents/distiller.md` (new), `skills/recall/SKILL.md`,
+  `agents/recall.md` (search order renumbered to 8 stages, new stage 1 identical text in both).
+- The C14 procedure lives in the agent body only; SKILL.md states the fork, the `--max $ARGUMENTS`
+  rule and the return shape, and points at the agent - so the procedure has one copy to drift from.
+- `distill next` has two zero-work outcomes and C14 names only one commit word for each, so the agent
+  says `**Commit:** locked` for exit 3 and `**Commit:** nothing pending` for empty stdout, and is told
+  not to call `finish` in the latter (C12 step 5 already released the lock).
+- A `distill record` that exits non-zero is defined as: keep its stderr, do not count the journal,
+  continue with the next path - C14 left this open and a stalled queue is worse than a partial run.
+- Surprise: `skills/distill/.gitkeep` is already tracked from a previous commit; left in place
+  (not in this story's file list), it is inert beside SKILL.md.
+- Verification: `claude plugin validate .` passes; the full suite (4 files) is green too - no test
+  reads `agents/` or `skills/`, so that is unchanged-by-construction, not new evidence.
 
 ## Findings
