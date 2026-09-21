@@ -173,4 +173,5 @@ The six lines below are the cycle's confirmation artifacts (docs/cycle.md); scri
 **Branch:** vulyk/litopys-phase-2-distill
 **Checked:**
 **Council:**
+**Council:** RED round 1, 2026-09-21, at 46ad0f2, pack d1994a26f56c
 **Shipped:**
