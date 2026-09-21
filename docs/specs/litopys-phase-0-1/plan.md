@@ -184,3 +184,4 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 **Council:** RED round 2, 2026-09-21, at ebda9de, pack e16ac0b7e26a - red: 6
 **Council:** GREEN round 3, 2026-09-21, at 9cea6d0, pack ac0d2bda0834
 **Shipped:**
+**Shipped:** 0.1.0, 2026-09-21, at efedfce - merged to main, publish pending
