@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# litopys CLI - deterministic chronicle writer, no model, no tokens.
+#
+#   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
+#          bash bin/litopys bench
+#          bash bin/litopys --version | help
+#
+# Invoked as `bash "${CLAUDE_PLUGIN_ROOT}/bin/litopys" <sub>` (C2) so Windows never
+# depends on PATH exec of an extension-less file.
+#
+# `append` mirrors VULYK's scripts/journal.sh: create-with-header-if-missing, append one
+# line, print the same line to stdout. After argument validation it is never a gate - a
+# chronicle record that cannot be written must not break the caller that wanted to write it.
+set -u
+
+VERSION="0.1.0"
+KINDS="grill brief verdict ship handoff note"
+
+usage() {
+  cat >&2 <<EOF
+litopys $VERSION
+  litopys append --kind <$(echo "$KINDS" | tr ' ' '|')> --ref <path|sha> [--note "<text>"]
+      Append one dated line to <root>/docs/chronicle/YYYY-MM.md. Idempotent on (ts, kind, ref).
+  litopys bench           Not yet - story 04.
+  litopys --version       Print $VERSION.
+  litopys help            This text.
+
+Environment: CLAUDE_PROJECT_DIR (project root override), LITOPYS_NOW (UTC ISO clock override).
+EOF
+}
+
+# C1 - project root: CLAUDE_PROJECT_DIR, then git toplevel, then \$PWD.
+project_root() {
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR:-}" ]; then
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
+    return 0
+  fi
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$top" ] && [ -d "$top" ]; then
+    printf '%s\n' "$top"
+    return 0
+  fi
+  printf '%s\n' "$PWD"
+}
+
+cmd_append() {
+  local kind="" ref="" note=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --kind|--ref|--note)
+        if [ $# -lt 2 ]; then
+          echo "litopys append: $1 needs a value" >&2; usage; return 2
+        fi
+        case "$1" in
+          --kind) kind="$2" ;;
+          --ref)  ref="$2" ;;
+          --note) note="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) echo "litopys append: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+
+  if [ -z "$kind" ]; then
+    echo "litopys append: --kind is required" >&2; usage; return 2
+  fi
+  case " $KINDS " in
+    *" $kind "*) : ;;
+    *) echo "litopys append: --kind must be one of: $KINDS" >&2; usage; return 2 ;;
+  esac
+  if [ -z "$ref" ]; then
+    echo "litopys append: --ref is required" >&2; usage; return 2
+  fi
+
+  local root ts month file prefix line found
+  root="$(project_root)"
+  ts="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  month="$(printf '%s' "$ts" | cut -c1-7)"
+
+  # Secrets never reach a committed chronicle line; redact.sh is a passthrough filter that
+  # always exits 0, so its absence costs the note nothing (C3).
+  if [ -n "$note" ] && [ -f "$root/scripts/redact.sh" ]; then
+    note="$(printf '%s\n' "$note" | bash "$root/scripts/redact.sh" 2>/dev/null || printf '%s' "$note")"
+  fi
+  # One record = one line: newlines, carriage returns and tabs collapse to spaces.
+  note="$(printf '%s' "$note" | tr '\n\r\t' '   ')"
+
+  file="$root/docs/chronicle/$month.md"
+  if [ ! -f "$file" ]; then
+    mkdir -p "$root/docs/chronicle" || { echo "litopys append: cannot create $root/docs/chronicle" >&2; return 0; }
+    printf '# Chronicle %s\n\n' "$month" > "$file"
+  fi
+
+  prefix="- $ts · $kind · $ref · "
+  line="$prefix$note"
+  found="$(awk -v p="$prefix" 'index($0, p) == 1 { print; exit }' "$file" 2>/dev/null || true)"
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+
+  printf '%s\n' "$line" >> "$file"
+  printf '%s\n' "$line"
+  return 0
+}
+
+SUB="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$SUB" in
+  append) cmd_append "$@"; exit $? ;;
+  bench) echo "litopys bench: not yet - story 04."; exit 0 ;;
+  --version|-v|version) echo "$VERSION"; exit 0 ;;
+  help|--help|-h) usage; exit 0 ;;
+  *) echo "litopys: unknown subcommand '$SUB'" >&2; usage; exit 2 ;;
+esac

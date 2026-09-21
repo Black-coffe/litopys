@@ -1,0 +1,9 @@
+{
+  "name": "litopys",
+  "version": "0.1.0",
+  "description": "Long-term project memory for Claude Code: a dated chronicle of sessions plus a wiki, written without a model call.",
+  "author": {
+    "name": "Andrei"
+  },
+  "keywords": ["memory", "chronicle", "wiki", "vulyk"]
+}
