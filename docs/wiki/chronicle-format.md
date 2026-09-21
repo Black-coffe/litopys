@@ -1,7 +1,7 @@
 ---
 domain: chronicle-format
 tags: [litopys, chronicle, journal]
-related: [memory/map/litopys-plugin.md, docs/specs/litopys-phase-2-distill/plan.md]
+related: [memory/map/litopys-plugin.md, docs/specs/litopys-phase-2-distill/plan.md, docs/wiki/session-record.md]
 last-verified: 2026-09-21
 ---
 
@@ -10,7 +10,8 @@ last-verified: 2026-09-21
 Two on-disk formats `bin/litopys` and `hooks/raw-journal.sh` write in a host project. Both are
 model-free and append-only. Source: `bin/litopys` `cmd_append()` and `hooks/raw-journal.sh`
 (spec `litopys-phase-0-1`, v0.1.0; amended by `litopys-phase-2-distill`, v0.2.0). The C11 session
-record, the C12 resume queue and `distill.jsonl` are a separate format - see plan.md C11-C14.
+record, the C12 resume queue and `distill.jsonl` are a separate format - see
+`docs/wiki/session-record.md` for the C11 record shape and plan.md C11-C14 for the full contract.
 
 ## C3 - chronicle line (`bin/litopys append`)
 

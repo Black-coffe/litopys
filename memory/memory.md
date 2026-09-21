@@ -59,3 +59,7 @@
 - `.litopys/` self-ignoring scratch directory (litopys 0.1.0, proposed): docs/adr/004-litopys-scratch-directory.md
 - Redaction delegated to host's `scripts/redact.sh`, plugin fallback deferred to phase 2 (litopys 0.1.0, proposed): docs/adr/005-redaction-delegated-to-host.md
 - Phase-2 input, raw journal vs `/export` losses: docs/specs/litopys-phase-0-1/recon/raw-vs-export.md
+- Distillation is skill-driven, no model calls from hooks (litopys 0.2.0, proposed): docs/adr/006-distillation-is-skill-driven-no-hook-model-calls.md
+- Session records commit pathspec-limited on the current branch via a run manifest (litopys 0.2.0, proposed): docs/adr/007-pathspec-limited-commit-on-current-branch.md
+- Distill queue: mkdir lock, N=3 oldest-first cap, first-user-line skip rule, done/skipped layout (litopys 0.2.0, proposed): docs/adr/008-distill-queue-lock-cap-skip-layout.md
+- One raw journal file = one session record regardless of mid-file closed/compact markers (litopys 0.2.0, proposed): docs/adr/009-one-journal-file-equals-one-session-record.md
