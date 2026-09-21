@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-0-1-02
 spec: litopys-phase-0-1
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -45,5 +45,9 @@ Contract C6 in plan.md (frontmatter fields, search order, return shape). Grill b
 `claude plugin validate .`
 
 ## Implementation notes
+- Files: `skills/recall/SKILL.md` (new, replaces `.gitkeep`), `agents/recall.md` (new, replaces `.gitkeep`).
+- Frontmatter and search order copied verbatim from plan.md contract C6; `allowed-tools`/`tools` lists match exactly.
+- `claude plugin validate .` (non-strict): passes with the same pre-existing warning as story 01 (root `CLAUDE.md` not loaded as plugin context) - exit 0.
+- Manual check: `cd E:/Projects/vulyk && claude -p --plugin-dir E:/Projects/litopys "/litopys:recall what changed in 0.15.0"` returned the C6 shape (`**Answer:**` / `**Refs:**` / `**Confidence:**`) with multiple `docs/`/`CHANGELOG.md` paths and several 7-char shas. The plain `agent: recall` field loaded correctly - no need for the `litopys:recall` fallback.
 
 ## Findings
