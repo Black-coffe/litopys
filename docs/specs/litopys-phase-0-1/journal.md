@@ -5,3 +5,4 @@
 - 2026-09-21T12:08:07Z · 03-building · branch vulyk/litopys-phase-0-1 created · next: build:1
 - 2026-09-21T12:16:08Z · 03-building · close-story exit 2 · next: verification not in ## Commands: bash tests/append.test.sh - story test rows added to CLAUDE.md, validate made non-strict (story 01 Findings), story 01 set in-progress, relaunching
 - 2026-09-21T12:22:00Z · 03-building · close-story exit 2 (stories 02, 03) · next: verification cells matched literally - Commands table fixed, 02 and 03 closed by hand, relaunching at build:3
+- 2026-09-21T12:38:45Z · 03-building · paused at both human gates · next: waves 1-4 done (gate watcher never ran: setsid absent in Git Bash, wave 4 built before the baseline); story 06 NEEDS_CONTEXT x2 is the designed human precondition, not a design fork - no lead-architect; owner runs bench in VULYK, then the >=100k session + /export, then /vulyk-resume
