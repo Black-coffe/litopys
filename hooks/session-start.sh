@@ -45,6 +45,12 @@ count_md() { # count_md <dir> - .md files directly in <dir>, 0 when it does not 
 chronicles="$(count_md "$root/docs/chronicle")"
 raws="$(count_md "$root/.litopys/raw")"
 
+if [ "$raws" -gt 0 ]; then
+  distill_line="[litopys] distill: $raws pending · run /litopys:distill"
+else
+  distill_line="[litopys] distill: nothing pending"
+fi
+
 # Last entry = the newest date on any C3 chronicle line, across every month file.
 last="$(cat "$root"/docs/chronicle/*.md 2>/dev/null \
   | grep -o '^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' 2>/dev/null \
@@ -55,7 +61,7 @@ ctx="$(printf '%s\n%s\n%s\n%s\n%s' \
   "[litopys] v$version · project chronicle" \
   "[litopys] chronicle: docs/chronicle/ ($chronicles files)" \
   "[litopys] last entry: $last" \
-  "[litopys] raw journals: $raws unconsolidated in .litopys/raw/" \
+  "$distill_line" \
   "[litopys] recall: /litopys:recall <question>")"
 
 jq -nc --arg ctx "$ctx" \

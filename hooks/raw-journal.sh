@@ -5,6 +5,7 @@
 #     bash hooks/raw-journal.sh prompt   # UserPromptSubmit -> '## user · <ts>'
 #     bash hooks/raw-journal.sh stop     # Stop             -> '## assistant · <ts>'
 #     bash hooks/raw-journal.sh end      # SessionEnd       -> '## closed · <ts> · <reason>'
+#     bash hooks/raw-journal.sh compact  # PreCompact       -> '## compact · <ts> · <trigger>'
 #
 # Writes <root>/.litopys/raw/<session_id>.md and nothing else. Never prints to stdout - a
 # hook that talks pollutes the session it is recording. Fail-open everywhere: a journal that
@@ -14,7 +15,7 @@
 set -u
 
 MODE="${1:-}"
-case "$MODE" in prompt|stop|end) : ;; *) exit 0 ;; esac
+case "$MODE" in prompt|stop|end|compact) : ;; *) exit 0 ;; esac
 
 # jq is the only parser (plan assumption). Nothing external runs before this check, so an
 # empty PATH is a silent no-op rather than a crash.
@@ -57,6 +58,11 @@ journal_end() { # SessionEnd: one append, only into a journal that already exist
   printf '\n## closed · %s · %s\n' "$ts" "${1:--}" >> "$file" 2>/dev/null || true
 }
 
+journal_compact() { # PreCompact: one append, only into a journal that already exists (C13).
+  [ -f "$file" ] || return 0
+  printf '\n## compact · %s · %s\n' "$ts" "${1:--}" >> "$file" 2>/dev/null || true
+}
+
 ensure_journal() { # create the C8 frontmatter on the first block of the session
   [ -f "$file" ] && return 0
   mkdir -p "$root/.litopys/raw" 2>/dev/null || return 1
@@ -90,5 +96,6 @@ case "$MODE" in
   prompt) append_block user "$(printf '%s' "$payload" | jq -r '.user_input // .prompt // empty' 2>/dev/null)" ;;
   stop)   append_block assistant "$(field last_assistant_message)" ;;
   end)    journal_end "$(field reason)" ;;
+  compact) journal_compact "$(printf '%s' "$payload" | jq -r '.compaction_trigger // .trigger // "-"' 2>/dev/null)" ;;
 esac
 exit 0

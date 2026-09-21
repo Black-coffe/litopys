@@ -138,3 +138,4 @@
 {"ts":"2026-09-21T13:49:28Z","story":"litopys-phase-0-1-09-raw-vs-export-losses","declared":1,"changed":4,"out_of_scope":3}
 {"ts":"2026-09-21T14:01:03Z","story":"litopys-phase-0-1-10-golden-q4-q5","declared":1,"changed":3,"out_of_scope":2}
 {"ts":"2026-09-21T15:30:35Z","story":"litopys-phase-2-distill-01-tracer-distill-record","declared":6,"changed":12,"out_of_scope":6}
+{"ts":"2026-09-21T15:31:01Z","story":"litopys-phase-2-distill-02-hooks-precompact-banner","declared":4,"changed":5,"out_of_scope":1}
