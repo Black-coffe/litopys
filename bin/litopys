@@ -28,11 +28,13 @@ litopys $VERSION
       Turn one raw journal plus one distilled body into docs/chronicle/sessions/<date>-<sid8>.md,
       append one session line to the monthly chronicle, move the journal to .litopys/raw/done/.
   litopys distill next [--max N]
-      Take the distill.lock mutex (stale after 30 minutes), move bench journals to
-      .litopys/raw/skipped/, print up to N (default 3) eligible journal paths oldest first.
+      Take the distill.lock mutex (stale after 30 minutes), park eligible bench, user-less and
+      already-distilled journals in .litopys/raw/skipped/, print up to N (default 3) eligible
+      journal paths oldest first. A journal whose session may still be running is never moved.
   litopys distill finish
-      Commit only docs/chronicle/ on the current branch (never the host's other staged or
-      unstaged work) and release the distill lock. Prints `committed <sha7>` or
+      Commit only the paths this run wrote (.litopys/distill.paths) on the current branch,
+      never the host's other staged or unstaged work, and release the distill lock.
+      Prints `committed <sha7>` or
       `uncommitted: <reason>`; always exit 0.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
@@ -596,6 +598,14 @@ RECORD
   # --- one chronicle line, through cmd_append's own path (one writer for the monthly file) --
   cmd_append --kind session --ref "$rel" --note "$title" > /dev/null || true
 
+  # --- the run manifest: exactly the paths this run wrote, repo-relative, one per line ------
+  # `distill finish` commits these and nothing else (review round 1, major 3). Appended only
+  # after a successful write - a refused `record` (exit 2) has returned long before here.
+  if mkdir -p "$root/.litopys" 2>/dev/null; then
+    printf '%s\ndocs/chronicle/%s.md\n' "$rel" "$(printf '%s' "$now" | cut -c1-7)" \
+      >> "$root/.litopys/distill.paths"
+  fi
+
   # --- the journal leaves the queue (C12: done/ only) --------------------------------------
   if mkdir -p "$root/.litopys/raw/done"; then
     [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
@@ -619,18 +629,21 @@ RECORD
 # released here only when nothing was selected - `distill finish` (story 05) releases it
 # otherwise.
 
-journal_scan() { # journal_scan <file> - prints "started<US>firstuser<US>lastheader" (US = \x1f,
-                  # not tab: bash `read` collapses consecutive IFS-whitespace delimiters, which
-                  # would silently swallow an empty field - journals with no `## user` block
-                  # need that middle field to stay empty and stay a field.
-  local file="$1" fm=0 line key val started="" firstuser="" lastheader="" inuser=0 seen=0
+journal_scan() { # journal_scan <file> - prints "started<US>firstuser<US>lastheader<US>sid" (US =
+                  # \x1f, not tab: bash `read` collapses consecutive IFS-whitespace delimiters,
+                  # which would silently swallow an empty field - journals with no `## user`
+                  # block need that middle field to stay empty and stay a field.
+  local file="$1" fm=0 line key val started="" firstuser="" lastheader="" sid="" inuser=0 seen=0
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
     if [ "$fm" -eq 1 ]; then
       if [ "$line" = "---" ]; then fm=2; continue; fi
       key="${line%%:*}"; val="$(trim "${line#*:}")"
-      case "$key" in started) started="$val" ;; esac
+      case "$key" in
+        started)    started="$val" ;;
+        session_id) sid="$val" ;;
+      esac
       continue
     fi
     case "$line" in
@@ -650,7 +663,7 @@ journal_scan() { # journal_scan <file> - prints "started<US>firstuser<US>lasthea
       inuser=0
     fi
   done < "$file"
-  printf '%s\x1f%s\x1f%s\n' "$started" "$firstuser" "$lastheader"
+  printf '%s\x1f%s\x1f%s\x1f%s\n' "$started" "$firstuser" "$lastheader" "$sid"
 }
 
 distill_next() {
@@ -701,27 +714,64 @@ distill_next() {
     files+=("$f")
   done
 
-  # --- skip rule: bench journals move to skipped/, never distilled -------------------------
-  local skipped=0 started firstuser lastheader
+  # --- eligibility FIRST, then the skip rule (review round 1, critical 1) -------------------
+  # A journal whose session may still be running is never moved and never selected, whatever
+  # its first line: otherwise the running `/litopys:distill` session's own journal is parked
+  # mid-session, the Stop hook re-creates it as a headless fragment, and the next run distills
+  # the plugin talking to itself. Only a journal that already passes eligibility (last block
+  # `## closed`, or mtime older than 60 minutes) can be parked or selected.
+  local skipped=0 started firstuser lastheader sid eligible epoch
+  local sidsafe rdate sid8 park seq tmplist=""
   for f in ${files[@]+"${files[@]}"}; do
-    IFS=$'\x1f' read -r started firstuser lastheader < <(journal_scan "$f")
+    IFS=$'\x1f' read -r started firstuser lastheader sid < <(journal_scan "$f")
+    eligible=0
+    case "$lastheader" in
+      '## closed'*) eligible=1 ;;
+      *) if [ -n "$(find "$f" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then eligible=1; fi ;;
+    esac
+    if [ "$eligible" -eq 0 ]; then
+      remain+=("$f")
+      continue
+    fi
+
+    # skip rule: a bench journal - and a journal with no `## user` block at all, which is what
+    # a `/litopys:distill` run leaves behind - is parked in skipped/, never distilled.
     case "$firstuser" in
-      /litopys:recall*|/litopys:distill*)
+      ''|/litopys:recall*|/litopys:distill*)
         if mv -f "$f" "$raw/skipped/$(basename "$f")" 2>/dev/null; then
           skipped=$((skipped + 1))
         else
           remain+=("$f")
         fi
+        continue
         ;;
-      *) remain+=("$f") ;;
     esac
-  done
-  local pending=${#remain[@]}
 
-  # --- eligibility + oldest-first order, by `started` (file mtime when absent) -------------
-  local epoch eligible tmplist=""
-  for f in ${remain[@]+"${remain[@]}"}; do
-    IFS=$'\x1f' read -r started firstuser lastheader < <(journal_scan "$f")
+    # review round 1, major 4: a session resumed after it was distilled gets a fresh journal
+    # with the same session_id, which every `record` refuses (`record exists`) and which would
+    # otherwise hold a cap slot forever. Park it - no merge, the resumed part is not chronicled.
+    if [ -n "$sid" ] && [ -n "$started" ]; then
+      rdate="$(printf '%s' "$started" | cut -c1-10)"
+      sid8="$(printf '%s' "$sid" | cut -c1-8)"
+      if [ -f "$root/docs/chronicle/sessions/$rdate-$sid8.md" ]; then
+        sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
+        park="$raw/skipped/$sidsafe.resumed.md"
+        seq=2
+        while [ -e "$park" ]; do
+          park="$raw/skipped/$sidsafe.resumed.$seq.md"
+          seq=$((seq + 1))
+        done
+        if mv -f "$f" "$park" 2>/dev/null; then
+          skipped=$((skipped + 1))
+        else
+          remain+=("$f")
+        fi
+        continue
+      fi
+    fi
+
+    # --- a candidate: keep its sort key, by `started` (file mtime when absent) --------------
+    remain+=("$f")
     epoch=""
     if [ -n "$started" ]; then
       epoch="$(date -u -d "$started" +%s 2>/dev/null || true)"
@@ -729,22 +779,20 @@ distill_next() {
     if [ -z "$epoch" ]; then
       epoch="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
     fi
-    eligible=0
-    case "$lastheader" in
-      '## closed'*) eligible=1 ;;
-      *) if [ -n "$(find "$f" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then eligible=1; fi ;;
-    esac
-    tmplist="$tmplist$epoch\t$eligible\t$f\n"
+    # Real tab and newline, and `printf %s` below: `%b` would interpret the backslash escapes
+    # of a Windows root (`\Users`, `\temp`, `\x..`) inside the path (review round 1, major 2).
+    tmplist="$tmplist$epoch"$'\t'"$f"$'\n'
   done
+  local pending=${#remain[@]}
 
   local -a selected=()
-  local sepoch selig sfile
-  while IFS=$'\t' read -r sepoch selig sfile; do
+  local sepoch sfile
+  while IFS=$'\t' read -r sepoch sfile; do
     [ -n "$sfile" ] || continue
-    if [ "$selig" -eq 1 ] && [ "${#selected[@]}" -lt "$max" ]; then
+    if [ "${#selected[@]}" -lt "$max" ]; then
       selected+=("$sfile")
     fi
-  done < <(printf '%b' "$tmplist" | sort -n -t $'\t' -k1,1)
+  done < <(printf '%s' "$tmplist" | sort -n -t $'\t' -k1,1)
 
   local k=${#selected[@]}
   for f in ${selected[@]+"${selected[@]}"}; do
@@ -761,11 +809,13 @@ distill_next() {
 }
 
 # --- distill finish (C12/C14) ---------------------------------------------------------------
-# Step 3 of the distiller: commit *only* `docs/chronicle/` on whatever branch the host is on and
-# release the lock. Never a gate - a repo that cannot take the commit keeps the records in the
-# working tree and gets one line saying why, still exit 0. The host's index outside
-# `docs/chronicle/` is never read and never written: one `git add -- docs/chronicle` and one
-# pathspec-limited `git commit -- docs/chronicle`, no `-a`, no `-A`, no `--no-verify`.
+# Step 3 of the distiller: commit *only the paths this run wrote* - the manifest
+# `.litopys/distill.paths` that `distill record` appends to - on whatever branch the host is on,
+# and release the lock. Never a gate: a repo that cannot take the commit keeps the records in the
+# working tree and gets one line saying why, still exit 0. The host's index is never read and
+# never written outside those paths - one `git add -- <paths>` and one pathspec-limited
+# `git commit -- <paths>`, no `-a`, no `-A`, no `--no-verify`, and no `docs/chronicle` sweep
+# (an unrelated host file under `docs/chronicle/` stays out of the distill commit).
 
 git_block_reason() { # git_block_reason <root> - prints why this repo cannot take the commit ("" = it can)
   local root="$1" gitdir
@@ -802,25 +852,47 @@ distill_finish() {
     echo "litopys distill finish: takes no arguments (got '$1')" >&2; usage; return 2
   fi
 
-  local root lock reason="" n sha errfile
+  local root lock manifest reason="" n sha errfile
   root="$(project_root)"
   lock="$root/.litopys/distill.lock"
+  manifest="$root/.litopys/distill.paths"
+
+  # --- the manifest, deduplicated, in the order it was written ------------------------------
+  local -a paths=()
+  local p q dup
+  if [ -f "$manifest" ]; then
+    while IFS= read -r p || [ -n "$p" ]; do
+      p="${p%$'\r'}"
+      [ -n "$p" ] || continue
+      [ -e "$root/$p" ] || continue
+      dup=0
+      for q in ${paths[@]+"${paths[@]}"}; do
+        if [ "$q" = "$p" ]; then dup=1; break; fi
+      done
+      [ "$dup" -eq 0 ] || continue
+      paths+=("$p")
+    done < "$manifest"
+  fi
 
   reason="$(git_block_reason "$root")"
   if [ -z "$reason" ]; then
     errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.finish-stderr")"
-    if [ ! -d "$root/docs/chronicle" ]; then
+    if [ "${#paths[@]}" -eq 0 ]; then
       reason="nothing to commit"
-    elif ! git -C "$root" add -- docs/chronicle 2>"$errfile"; then
+    elif ! git -C "$root" add -- ${paths[@]+"${paths[@]}"} 2>"$errfile"; then
       reason="$(git_error_line "$errfile")"
-    elif [ -z "$(git -C "$root" diff --cached --name-only -- docs/chronicle 2>/dev/null || true)" ]; then
+    elif [ -z "$(git -C "$root" diff --cached --name-only -- ${paths[@]+"${paths[@]}"} 2>/dev/null || true)" ]; then
       reason="nothing to commit"
     else
-      # <n> is read off the staged diff, never off distill.jsonl: the message must describe
-      # this commit, not the journal that produced it.
-      n="$(git -C "$root" diff --cached -- docs/chronicle 2>/dev/null | awk -v m=" · session · " '/^\+/ && !/^\+\+\+/ && index($0, m) { c++ } END { print c + 0 }')"
-      n="${n:-0}"
-      if git -C "$root" commit -m "chore(chronicle): distill $n session(s) [litopys]" -- docs/chronicle > /dev/null 2>"$errfile"; then
+      # <n> is the number of distinct record paths this run wrote, never a row count from
+      # distill.jsonl and never a line count off the diff: a `--force` re-distillation appends
+      # a second chronicle line for the same session and must still say one (major 10 of the
+      # same review is not this story's, but the path count gets it right for free).
+      n=0
+      for p in ${paths[@]+"${paths[@]}"}; do
+        case "$p" in docs/chronicle/sessions/*.md) n=$((n + 1)) ;; esac
+      done
+      if git -C "$root" commit -m "chore(chronicle): distill $n session(s) [litopys]" -- ${paths[@]+"${paths[@]}"} > /dev/null 2>"$errfile"; then
         sha="$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)"
       else
         reason="$(git_error_line "$errfile")"
@@ -829,8 +901,13 @@ distill_finish() {
     rm -f "$errfile" 2>/dev/null || true
   fi
 
-  # The lock goes whatever happened - a refused commit must not wedge the next run (C12).
+  # The lock goes whatever happened - a refused commit must not wedge the next run (C12). The
+  # manifest survives every refusal so a later `finish` commits the same paths; it goes once
+  # they are in a commit, or once there is nothing left in it to commit.
   rm -rf "$lock" 2>/dev/null || true
+  if [ -z "$reason" ] || [ "$reason" = "nothing to commit" ]; then
+    rm -f "$manifest" 2>/dev/null || true
+  fi
 
   if [ -n "$reason" ]; then
     printf 'uncommitted: %s\n' "$reason"

@@ -130,6 +130,9 @@ if [ -f "$P/.litopys/raw/done/$SID.md" ]; then echo "  ok    journal moved to do
 else bad "journal not at .litopys/raw/done/$SID.md"; fi
 no_file "journal gone from the top level" "$P/.litopys/raw/$SID.md"
 
+eq "record appends both paths it wrote to the run manifest" "$REL
+docs/chronicle/$MONTH.md" "$(cat "$P/.litopys/distill.paths")"
+
 eq "one distill.jsonl row" "1" "$(grep -c . "$P/.litopys/distill.jsonl")"
 row="$(cat "$P/.litopys/distill.jsonl")"
 for k in '"ts":' '"session_id":' '"record":' '"journal_bytes":' '"body_bytes":' '"tokens_est":' '"model":' '"source":' '"litopys":'; do
@@ -185,6 +188,7 @@ badcase() { # badcase <label> <extra args...>   (journal + a project of its own)
   eq "$label exits 2" "2" "$rc"
   no_file "$label writes no record" "$b/docs/chronicle"
   no_file "$label writes no cost row" "$b/.litopys/distill.jsonl"
+  no_file "$label appends nothing to the run manifest" "$b/.litopys/distill.paths"
   if [ -f "$b/.litopys/raw/$SID.md" ]; then echo "  ok    $label leaves the journal queued"
   else bad "$label moved the journal"; fi
 }
@@ -281,24 +285,91 @@ $Q3/.litopys/raw/j3.md"
 eq "N2 default cap prints three of four eligible" "$exp" "$out"
 eq "N2 default cap stderr: pending 4 selected 3" "skipped 0 · pending 4 · selected 3" "$(cat "$T/n3.err")"
 
-# N3: an open session (last header ## user) is pending, not printed, until its mtime ages past
-# 60 minutes; a journal with no ## user block at all is treated as normal (not skipped).
+# N3: eligibility is decided before the skip rule (review round 1, critical 1). A journal whose
+# session may still be running is never moved, whatever its first user line - so the running
+# /litopys:distill session's own journal stays put and its fragment is never created. A closed
+# journal with no ## user block at all is skipped, not distilled.
 Q4="$T/n4-open"
 mkdir -p "$Q4/.litopys/raw"
 mkjournal "$Q4/.litopys/raw/open.md" "n4open01-1111-2222-3333-444455556666" "2026-09-05T08:00:00Z" "still going" open
+# the live distiller's own journal: first user line is the slash command, last block is
+# ## assistant, mtime fresh.
+printf -- '---\nlitopys: raw\nversion: 1\nsession_id: n4dist01-1111-2222-3333-444455556666\nstarted: 2026-09-05T08:00:00Z\ncwd: /host/project\nbranch: main\n---\n\n## user · 2026-09-05T08:00:00Z\n/litopys:distill\n\n## assistant · 2026-09-05T08:05:00Z\nworking\n' \
+  > "$Q4/.litopys/raw/running.md"
 printf -- '---\nlitopys: raw\nversion: 1\nsession_id: n4nouser1-1111-2222-3333-444455556666\nstarted: 2026-09-05T08:00:00Z\ncwd: /host/project\nbranch: main\n---\n\n## closed · 2026-09-05T08:10:00Z · other\n' \
   > "$Q4/.litopys/raw/nouser.md"
 export CLAUDE_PROJECT_DIR="$Q4"
 out="$(bash "$CLI" distill next 2>"$T/n4.err")"
-eq "N3 fresh open session withheld; user-less journal is normal and eligible" \
-  "$Q4/.litopys/raw/nouser.md" "$out"
-eq "N3 stderr: pending 2 selected 1" "skipped 0 · pending 2 · selected 1" "$(cat "$T/n4.err")"
+eq "N3 nothing selected: two open journals, one user-less closed one" "" "$out"
+eq "N3 stderr: skipped 1 pending 2 selected 0" "skipped 1 · pending 2 · selected 0" "$(cat "$T/n4.err")"
+if [ -f "$Q4/.litopys/raw/skipped/nouser.md" ]; then echo "  ok    N3 closed user-less journal skipped"
+else bad "N3 closed user-less journal not in skipped/"; fi
 if [ -f "$Q4/.litopys/raw/open.md" ]; then echo "  ok    N3 open-session journal untouched"
 else bad "N3 open-session journal moved"; fi
+if [ -f "$Q4/.litopys/raw/running.md" ]; then echo "  ok    N3 live /litopys:distill journal left at the top level"
+else bad "N3 the running distill journal was moved mid-session"; fi
+rm -rf "$Q4/.litopys/distill.lock"
+touch -d '61 minutes ago' "$Q4/.litopys/raw/running.md"
+out2="$(bash "$CLI" distill next 2>"$T/n4b.err")"
+eq "N3 aged /litopys:distill journal is skipped, never printed" "" "$out2"
+eq "N3 aged distill journal stderr: skipped 1 pending 1 selected 0" \
+  "skipped 1 · pending 1 · selected 0" "$(cat "$T/n4b.err")"
+if [ -f "$Q4/.litopys/raw/skipped/running.md" ]; then echo "  ok    N3 aged distill journal moved to skipped/"
+else bad "N3 aged distill journal not in skipped/"; fi
 rm -rf "$Q4/.litopys/distill.lock"
 touch -d '61 minutes ago' "$Q4/.litopys/raw/open.md"
+out3="$(bash "$CLI" distill next 2>/dev/null)"
+printf '%s' "$out3" | expect "N3 open session printed once its mtime ages past 60 minutes" "open.md"
+
+# N3b: an eligible journal whose record already exists is parked in skipped/<sid>.resumed.md -
+# never re-distilled, never holding a cap slot (review round 1, major 4).
+Q10="$T/n10-resumed"
+RSID="fa11dead-1111-2222-3333-444455556666"
+mkdir -p "$Q10/.litopys/raw" "$Q10/docs/chronicle/sessions"
+printf -- '---\nlitopys: session\n---\n# already distilled\n' > "$Q10/docs/chronicle/sessions/2026-09-08-fa11dead.md"
+mkjournal "$Q10/.litopys/raw/resumed.md" "$RSID" "2026-09-08T08:00:00Z" "carry on" closed
+mkjournal "$Q10/.litopys/raw/other.md" "n10oth01-1111-2222-3333-444455556666" "2026-09-09T08:00:00Z" "normal" closed
+export CLAUDE_PROJECT_DIR="$Q10"
+out="$(bash "$CLI" distill next 2>"$T/n10.err")"
+eq "N3b resumed journal not printed, the normal one is" "$Q10/.litopys/raw/other.md" "$out"
+eq "N3b stderr: skipped 1 pending 1 selected 1" "skipped 1 · pending 1 · selected 1" "$(cat "$T/n10.err")"
+if [ -f "$Q10/.litopys/raw/skipped/$RSID.resumed.md" ]; then echo "  ok    N3b parked as <sid>.resumed.md"
+else bad "N3b no $Q10/.litopys/raw/skipped/$RSID.resumed.md"; fi
+no_file "N3b resumed journal gone from the top level" "$Q10/.litopys/raw/resumed.md"
+rm -rf "$Q10/.litopys/distill.lock"
+printf 'FIRSTPARK\n' > "$Q10/.litopys/raw/skipped/$RSID.resumed.md"
 out2="$(bash "$CLI" distill next 2>/dev/null)"
-printf '%s' "$out2" | expect "N3 open session printed once its mtime ages past 60 minutes" "open.md"
+printf '%s' "$out2" | refute "N3b a following next no longer sees the resumed journal" "$RSID"
+rm -rf "$Q10/.litopys/distill.lock"
+mkjournal "$Q10/.litopys/raw/resumed-again.md" "$RSID" "2026-09-08T08:00:00Z" "carry on twice" closed
+bash "$CLI" distill next > /dev/null 2>&1
+if [ -f "$Q10/.litopys/raw/skipped/$RSID.resumed.2.md" ]; then echo "  ok    N3b a second resume gets a numeric suffix"
+else bad "N3b no $RSID.resumed.2.md"; fi
+cat "$Q10/.litopys/raw/skipped/$RSID.resumed.md" | expect "N3b the first parked file was not overwritten" "FIRSTPARK"
+
+# N3c: a root carrying backslash-escape-shaped segments (a Windows path) is never passed through
+# printf escape interpretation (review round 1, major 2).
+Q11=""; BSROOT=""
+if command -v cygpath > /dev/null 2>&1; then
+  Q11="$T/n11-bs"
+  mkdir -p "$Q11/.litopys/raw"
+  BSROOT="$(cygpath -w "$Q11")"
+else
+  Q11="$T/n11-bs/\\Users\\temp"
+  mkdir -p "$Q11/.litopys/raw" 2>/dev/null
+  [ -d "$Q11/.litopys/raw" ] && BSROOT="$Q11"
+fi
+if [ -n "$BSROOT" ]; then
+  mkjournal "$Q11/.litopys/raw/bs1.md" "n11bs001-1111-2222-3333-444455556666" "2026-09-07T08:00:00Z" "windows root" closed
+  export CLAUDE_PROJECT_DIR="$BSROOT"
+  out="$(bash "$CLI" distill next 2>"$T/n11.err")"; rc=$?
+  eq "N3c backslash root exits 0" "0" "$rc"
+  printf '%s' "$out" | expect "N3c backslash root prints the eligible journal" "bs1.md"
+  eq "N3c backslash root stderr is exactly one line" "1" "$(grep -c . "$T/n11.err")"
+  eq "N3c backslash root stderr shape" "skipped 0 · pending 1 · selected 1" "$(cat "$T/n11.err")"
+else
+  bad "N3c could not create a backslash-bearing root"
+fi
 
 # N4: a mid-file ## closed followed by more blocks, ending in a final ## closed, is eligible
 # and printed once - one file, one session (C13).
@@ -445,6 +516,8 @@ refuses() { # refuses <label> <root> <expected reason>
   if [ -d "$r/docs/chronicle/sessions" ]; then echo "  ok    $label record still in the working tree"
   else bad "$label lost the record"; fi
   no_file "$label released the lock" "$r/.litopys/distill.lock"
+  if [ -f "$r/.litopys/distill.paths" ]; then echo "  ok    $label kept the run manifest"
+  else bad "$label dropped the run manifest a later finish needs"; fi
 }
 
 R2="$(newrepo f2-detached)"
@@ -534,6 +607,42 @@ case "$out" in "committed "*) echo "  ok    F10 two-record run commits" ;; *) ba
 eq "F10 message counts two sessions" "chore(chronicle): distill 2 session(s) [litopys]" \
   "$(git -C "$RA" log -1 --pretty=%s)"
 eq "F10 commit touches nothing outside docs/chronicle/" "" "$(outside_chronicle "$RA")"
+
+# F12: the commit holds only what this run wrote - an unrelated untracked file and a host edit
+# to a tracked month file, both under docs/chronicle/, stay out of it (review round 1, major 3).
+RB="$(newrepo f12-only-ours)"
+mkdir -p "$RB/docs/chronicle"
+printf '# Chronicle 2020-01\n\n- old\n' > "$RB/docs/chronicle/2020-01.md"
+git -C "$RB" add -- docs/chronicle/2020-01.md > /dev/null 2>&1
+git -C "$RB" commit -qm chronicle > /dev/null 2>&1
+put_record "$RB" "fbaaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+printf 'golden\n' > "$RB/docs/chronicle/golden-questions.md"
+printf -- '- host edit\n' >> "$RB/docs/chronicle/2020-01.md"
+export CLAUDE_PROJECT_DIR="$RB"
+out="$(bash "$CLI" distill finish 2>/dev/null)"
+case "$out" in "committed "*) echo "  ok    F12 commits" ;; *) bad "F12 got '$out'" ;; esac
+eq "F12 the commit holds only this run's record and month file" \
+  "docs/chronicle/2026-09.md
+docs/chronicle/sessions/2026-09-18-fbaaaaaa.md" \
+  "$(git -C "$RB" show --pretty=format: --name-only HEAD | grep . | sort)"
+eq "F12 the unrelated file under docs/chronicle/ is still untracked" "docs/chronicle/golden-questions.md" \
+  "$(git -C "$RB" ls-files --others --exclude-standard -- docs/chronicle)"
+eq "F12 the host edit to the tracked month file is still unstaged" "docs/chronicle/2020-01.md" \
+  "$(git -C "$RB" diff --name-only)"
+no_file "F12 the manifest is consumed by the commit" "$RB/.litopys/distill.paths"
+
+# F13: <n> counts distinct record paths - a --force re-distillation of one record says one.
+RC="$(newrepo f13-force)"
+SIDF="fcaaaaaa-1111-2222-3333-444455556666"
+put_record "$RC" "$SIDF" "2026-09-18T08:00:00Z"
+mkjournal "$RC/.litopys/raw/$SIDF.md" "$SIDF" "2026-09-18T08:00:00Z" "again" closed
+CLAUDE_PROJECT_DIR="$RC" LITOPYS_NOW="2026-09-21T14:00:00Z" bash "$CLI" distill record \
+  --journal "$RC/.litopys/raw/$SIDF.md" --body "$FIX/distill-body.md" --force > /dev/null 2>&1
+export CLAUDE_PROJECT_DIR="$RC"
+out="$(bash "$CLI" distill finish 2>/dev/null)"
+case "$out" in "committed "*) echo "  ok    F13 --force run commits" ;; *) bad "F13 got '$out'" ;; esac
+eq "F13 a second chronicle line does not inflate <n>" "chore(chronicle): distill 1 session(s) [litopys]" \
+  "$(git -C "$RC" log -1 --pretty=%s)"
 
 # F11: argument handling - finish takes none.
 eq "F11 stray argument exits 2" "2" "$(bash "$CLI" distill finish --now > /dev/null 2>&1; echo $?)"
