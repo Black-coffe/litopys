@@ -116,6 +116,31 @@ trim() { # trim <string> - strip leading and trailing whitespace
   printf '%s' "$s"
 }
 
+# C5 token extraction. `claude -p --output-format json` reports the input side in three fields
+# and a forked skill's *uncached* `input_tokens` is a couple of tokens while cache creation and
+# cache read carry the actual spend (live probe: input 2, cache_creation 50520, cache_read 0,
+# output 4) - reading the uncached slice alone made every real baseline row read 0 (round-1
+# seat, Ask 4). So `tokens_in` is the sum of all three. `modelUsage` is the same information
+# per model in camelCase; it is the fallback when a top-level `usage` object exists but is
+# all-zero. `null` is written only when neither object is present at all.
+BENCH_USAGE_JQ='
+def num($v): if ($v | type) == "number" then $v else 0 end;
+def tin($u):  num($u.input_tokens)  + num($u.cache_creation_input_tokens) + num($u.cache_read_input_tokens)
+            + num($u.inputTokens)   + num($u.cacheCreationInputTokens)    + num($u.cacheReadInputTokens);
+def tout($u): num($u.output_tokens) + num($u.outputTokens);
+(if (.usage | type) == "object" then {i: tin(.usage), o: tout(.usage)} else null end) as $top
+| (if (.modelUsage | type) == "object"
+   then (.modelUsage | to_entries | map(.value))
+        | {i: (map(tin(.)) | add // 0), o: (map(tout(.)) | add // 0)}
+   else null end) as $mod
+| (if   $top != null and ($top.i + $top.o) > 0 then $top
+   elif $mod != null and ($mod.i + $mod.o) > 0 then $mod
+   elif $top != null then $top
+   else $mod end) as $u
+| [ (if $u == null then "null" else ($u.i | tostring) end),
+    (if $u == null then "null" else ($u.o | tostring) end),
+    (.total_cost_usd // null | tostring) ] | @tsv'
+
 # `bench` is a manual/CLI mode: it must never read stdin, or a terminal run with an open pipe
 # would block forever (VULYK's handoff.py "manual modes must NOT read stdin" bug). Every
 # child process that could inherit the terminal gets </dev/null.
@@ -191,6 +216,7 @@ cmd_bench() {
   local hits=0 refs_hit=0 refs_exp=0 total=0
   local -a keys refs
   local out rc res started ended secs kp ref matched nkeys nrefs err meta ti to cost hit k row
+  local is_err failed
   for i in 1 2 3 4 5; do
     IFS='|' read -r -a keys <<< "${qans[$i]}"
     IFS=';' read -r -a refs <<< "${qrefs[$i]}"
@@ -206,15 +232,19 @@ cmd_bench() {
     total=$((total + secs))
 
     res="$(printf '%s' "$out" | jq -r '.result // ""' 2>/dev/null || true)"
-    meta="$(printf '%s' "$out" | jq -r \
-      '[(.usage.input_tokens // null | tostring), (.usage.output_tokens // null | tostring), (.total_cost_usd // null | tostring)] | @tsv' \
-      2>/dev/null || true)"
+    meta="$(printf '%s' "$out" | jq -r "$BENCH_USAGE_JQ" 2>/dev/null || true)"
     IFS=$'\t' read -r ti to cost <<< "$meta"
     ti="${ti:-null}"; to="${to:-null}"; cost="${cost:-null}"
 
+    # A call is failed if claude exited non-zero OR answered with "is_error":true - the latter
+    # is an error report in the result field, never an answer, and must not be scored as one.
+    is_err="$(printf '%s' "$out" | jq -r 'if (.is_error == true) then 1 else 0 end' 2>/dev/null || true)"
+    failed=0
+    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ]; then failed=1; fi
+
     hit=false
     nkeys=0
-    if [ "$rc" -eq 0 ]; then
+    if [ "$failed" -eq 0 ]; then
       for k in "${keys[@]}"; do
         kp="$(trim "$k")"
         [ -n "$kp" ] || continue
@@ -229,7 +259,7 @@ cmd_bench() {
       ref="$(trim "$k")"
       [ -n "$ref" ] || continue
       nrefs=$((nrefs + 1))
-      if [ "$rc" -eq 0 ] && printf '%s' "$res" | grep -qF -- "$ref"; then
+      if [ "$failed" -eq 0 ] && printf '%s' "$res" | grep -qF -- "$ref"; then
         matched=$((matched + 1))
       fi
     done
@@ -245,10 +275,15 @@ cmd_bench() {
       --arg litopys "$VERSION" \
       '{ts:$ts,project:$project,q:$q,question:$question,hit:$hit,refs_expected:$refs_expected,refs_matched:$refs_matched,tokens_in:$tokens_in,tokens_out:$tokens_out,cost_usd:$cost_usd,seconds:$seconds,model:$model,litopys:$litopys}')"
 
-    if [ "$rc" -ne 0 ]; then
-      err="$(head -n 1 "$errfile" 2>/dev/null || true)"
-      [ -n "$err" ] || err="$(printf '%s' "$out" | head -n 1)"
-      [ -n "$err" ] || err="claude exited $rc"
+    if [ "$failed" -eq 1 ]; then
+      if [ "$rc" -ne 0 ]; then
+        err="$(head -n 1 "$errfile" 2>/dev/null || true)"
+        [ -n "$err" ] || err="$(printf '%s' "$out" | head -n 1)"
+        [ -n "$err" ] || err="claude exited $rc"
+      else
+        err="$(printf '%s' "$res" | head -n 1)"
+        [ -n "$err" ] || err="is_error"
+      fi
       row="$(printf '%s' "$row" | jq -c --arg error "$err" '. + {error:$error}')"
     fi
     printf '%s\n' "$row" >> "$out_file"

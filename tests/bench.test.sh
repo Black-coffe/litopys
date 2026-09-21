@@ -74,20 +74,28 @@ eq "seconds is a number"         "number" "$(field "$BL" Q1 '.seconds|type')"
 eq "Q1 hit (case-insensitive)"   "true"   "$(field "$BL" Q1 .hit)"
 eq "Q1 refs_expected"            "2"      "$(field "$BL" Q1 .refs_expected)"
 eq "Q1 refs_matched"             "2"      "$(field "$BL" Q1 .refs_matched)"
-eq "Q1 tokens_in from usage"     "12345"  "$(field "$BL" Q1 .tokens_in)"
+# tokens_in is the whole input side (12 uncached + 27542 cache-creation + 24062 cache-read),
+# not the uncached slice alone - a cache-blind column reads ~0 on every real run (C5, round 1).
+eq "Q1 tokens_in is cache-inclusive" "51616" "$(field "$BL" Q1 .tokens_in)"
+refute_uncached="$(field "$BL" Q1 .tokens_in)"
+if [ "$refute_uncached" = "12" ]; then bad "Q1 tokens_in is the uncached slice only"; fi
 eq "Q1 tokens_out from usage"    "678"    "$(field "$BL" Q1 .tokens_out)"
 eq "Q1 cost_usd"                 "0.0123" "$(field "$BL" Q1 .cost_usd)"
 eq "Q1 has no error key"         "null"   "$(field "$BL" Q1 '.error // "null"')"
 
-# Q2: hit, one ref of two
+# Q2: hit, one ref of two; top-level usage is all-zero so modelUsage is summed over both models
 eq "Q2 hit"                      "true"   "$(field "$BL" Q2 .hit)"
 eq "Q2 refs_matched 1 of 2"      "1"      "$(field "$BL" Q2 .refs_matched)"
 eq "Q2 refs_expected"            "2"      "$(field "$BL" Q2 .refs_expected)"
+eq "Q2 tokens_in from modelUsage"  "2356" "$(field "$BL" Q2 .tokens_in)"
+eq "Q2 tokens_out from modelUsage" "120"  "$(field "$BL" Q2 .tokens_out)"
 
 # Q3: miss
 eq "Q3 miss"                     "false"  "$(field "$BL" Q3 .hit)"
 eq "Q3 refs_matched 0"           "0"      "$(field "$BL" Q3 .refs_matched)"
 eq "Q3 still counts its refs"    "1"      "$(field "$BL" Q3 .refs_expected)"
+eq "Q3 tokens_in is cache-inclusive" "1503" "$(field "$BL" Q3 .tokens_in)"
+eq "Q3 tokens_out from usage"    "40"     "$(field "$BL" Q3 .tokens_out)"
 
 # Q4: the stub exits 1
 eq "Q4 failed call is not a hit" "false"  "$(field "$BL" Q4 .hit)"
@@ -120,6 +128,23 @@ eq "second run keeps its own ts" "2026-09-21T13:00:00Z" \
    "$(jq -r 'select(.q == "Q1") | .ts' "$BL" | tail -n 1)"
 if jq -e . "$BL" > /dev/null 2>&1; then echo "  ok    every row is valid JSON"
 else bad "baseline.jsonl holds a row jq cannot parse"; fi
+
+# --- exit 0 with "is_error":true is a failed call, not an answer (C5) ----------------------
+E="$T/is-error-proj"
+mkdir -p "$E/docs/chronicle"
+cp "$QFIX" "$E/docs/chronicle/golden-questions.md"
+EBL="$E/.litopys/baseline.jsonl"
+eout="$(CLAUDE_PROJECT_DIR="$E" LITOPYS_STUB_IS_ERROR=1 LITOPYS_NOW="$NOW" bash "$CLI" bench 2>/dev/null)"
+eq "is_error run still exits 0"  "0"      "$?"
+eq "is_error run writes 5 rows"  "5"      "$(rows "$EBL")"
+printf '%s' "$eout" | expect "is_error scores no hits" "hits 0/5 · refs 0/8 ·"
+eq "is_error Q1 not a hit"       "false"  "$(field "$EBL" Q1 .hit)"
+eq "is_error Q1 refs_matched 0"  "0"      "$(field "$EBL" Q1 .refs_matched)"
+eq "is_error Q1 keeps refs_expected" "2"  "$(field "$EBL" Q1 .refs_expected)"
+eq "is_error Q1 carries the first result line" "API Error: 500 upstream connect error" \
+   "$(field "$EBL" Q1 .error)"
+field "$EBL" Q1 .error | refute "is_error takes the FIRST line only" "v1.2.3"
+eq "is_error row still has tokens" "1007" "$(field "$EBL" Q1 .tokens_in)"
 
 # --- bench never reads stdin (manual mode; an open pipe must not block) --------------------
 S="$T/stdin-proj"
