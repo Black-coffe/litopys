@@ -4,8 +4,8 @@
 
 ## Q1 · Что было в релизе до 0.1, как брейнштормили, что устарело?
 - answer: v0.1.0 | subtraction | additive
-- refs: CHANGELOG.md; 1a55780; docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md
-- source: `git tag | sort -V | head -1` and `git show 21760d6 --stat` show v0.1.0 is the repo's root commit (no earlier release exists); the grill's brainstorm proposed a "subtraction" release (cut a third of agents, a quarter of commands, half the hooks), but `git show 1a55780` (CHANGELOG's `[0.2.0]` section, `git log -S'## [0.2.0]' -- CHANGELOG.md`) opens "Additive release: nothing removed" - the grill's own subtraction plan was the thing superseded before it shipped.
+- refs: 1a55780; docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md
+- source: `git tag | sort -V | head -1` and `git show 21760d6 --stat` show v0.1.0 is the repo's root commit (no earlier release exists); the grill (`docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md`) proposed a breaking «вычитание» release (cut a third of agents, a quarter of commands, half the hooks) - the English word "subtraction" itself occurs only in the `1a55780` commit message (found via `git log -S` + the literal word, "The original plan for this release was a breaking subtraction ..."); `git show 1a55780` (CHANGELOG's `[0.2.0]` section) opens "Additive release: nothing removed" - the grill's own subtraction plan was the thing superseded before it shipped.
 
 ## Q2 · What did v0.7.0 add to the planning stage, and what enforces it?
 - answer: trace-check.sh | Traceability spine
@@ -18,11 +18,11 @@
 - source: `docs/adr/001-cycle-state-contract.md` decides "one truth on disk, two thin drivers" because the Workflow runtime "has no filesystem, no shell, no Node API and no clock", so it cannot hold a round counter or write a ledger; `cycle.sh` on disk is the one truth both drivers read.
 
 ## Q4 · What did the adversarial grill on the autonomous-cycle council brief conclude about stage 05?
-- answer: auto-ACCEPTED | мини-гриль
+- answer: no owner response by | мини-гриль
 - refs: docs/grill/2026-09-12-autonomous-cycle-council-adversarial.md
-- source: `docs/grill/2026-09-12-autonomous-cycle-council-adversarial.md` section 1.1/3.1 - it argues the brief's blind council does not replace the human stage 05 review, it triples `drone-acceptance` instead, and recommends instead giving `human-check.sh` a deadline so an unanswered stage 05 resolves `auto-ACCEPTED`, keeping only the existing "мини-гриль" (mini-grill, decision 9) as the honest compensation for removing the human gate.
+- source: `docs/grill/2026-09-12-autonomous-cycle-council-adversarial.md` section 3.1 - it argues the brief's blind council does not replace the human stage 05 review, it triples `drone-acceptance` instead, and proposes giving `human-check.sh` a deadline: «Первое: `human-check.sh` получает дедлайн ... если владелец не записал ACCEPTED/REJECTED за N часов, `ship-check.sh` принимает `**Checked:** auto, no owner response by <ts>`», keeping only the existing "мини-гриль" (mini-grill, decision 9) as the honest compensation for removing the human gate.
 
 ## Q5 · Which agent was retired in favour of drone-coverage judging by ask?
-- answer: drone-acceptance | cycle-clerk
+- answer: drone-acceptance.md | autonomous-cycle-05
 - refs: 7d243a9; docs/specs/autonomous-cycle/autonomous-cycle-05-council-agents.md
-- source: `git show 7d243a9 --stat` shows `.claude/agents/drone-acceptance.md` deleted (82 lines removed) in the same commit that adds `council-haiku/sonnet/opus.md` and `cycle-clerk.md` and changes `drone-coverage.md` to judge by ask, per the story file `docs/specs/autonomous-cycle/autonomous-cycle-05-council-agents.md`.
+- source: `git show 7d243a9 --stat` shows `.claude/agents/drone-acceptance.md` deleted (82 lines removed) in the commit titled «drone-acceptance retired; drone-coverage judges by ask», story slug `autonomous-cycle-05` (`docs/specs/autonomous-cycle/autonomous-cycle-05-council-agents.md`), which also adds three new council seats.

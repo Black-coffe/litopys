@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-0-1-10
 spec: litopys-phase-0-1
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -44,5 +44,11 @@ Contract C4 in plan.md. `council/round-2/review.md` majors 2, 3 and minors 6, 7 
 `grep -c '^## Q[1-5] · ' examples/vulyk/golden-questions.md | grep -qx 5 && ! grep -qi 'auto-ACCEPTED\|cycle-clerk' examples/vulyk/golden-questions.md && ! grep -E '^- refs: .*[#\[]' examples/vulyk/golden-questions.md && ! grep -E '^- refs: CHANGELOG.md' examples/vulyk/golden-questions.md`
 
 ## Implementation notes
+- Touched only `examples/vulyk/golden-questions.md`; every keyphrase re-verified read-only against E:/Projects/vulyk tracked files (no `.litopys/` reads, no `bench`/`recall` run).
+- Q1 refs: `CHANGELOG.md; 1a55780; docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md` -> `1a55780; docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md` (dropped the bare `CHANGELOG.md` ref per major/minor 7 - a Q1 answer citing the changelog at all would have matched it; `1a55780` already covers the CHANGELOG fact via `git show`). Verified: `git grep -E '^- refs: CHANGELOG.md' examples/vulyk/golden-questions.md` now empty.
+- Q1 `source:` corrected (minor 6): previously attributed "subtraction" to the grill file, but the grill (`docs/grill/2026-07-27-vulyk-v0-2-0-opus-5.md`) only says «вычитание» - the English word occurs solely in the `1a55780` commit message. New source names that. Verified with `cd E:/Projects/vulyk && git show -s --format='%B' 1a55780` (body contains "a breaking subtraction") and `git grep -F -- subtraction -- '*'` (only hits: the `1a55780` commit via `git log -S`, and `memory/learnings/2026-07-27-opus-5-migration.md`; not the grill). `answer:` keyphrases (`v0.1.0 | subtraction | additive`) unchanged - only `refs:`/`source:` moved, per Non-goals.
+- Q4 `answer:` `auto-ACCEPTED | мини-гриль` -> `no owner response by | мини-гриль` (major 2: `auto-ACCEPTED` occurred in no tracked VULYK file - it was sourced from a `.litopys/raw/` journal, banned by Non-goals). Verified new keyphrase with `cd E:/Projects/vulyk && git grep -nF -- 'no owner response by' -- docs/grill/2026-09-12-autonomous-cycle-council-adversarial.md` (hit, line 61, the deadline proposal in section 3.1) and `git grep -lF -- 'no owner response by'` (only that one file, repo-wide). `мини-гриль` kept - review's "Checked and clean" section already confirmed it is literal in the grill and not ubiquitous (5 files). `source:` rewritten to quote the actual grill sentence («Первое: `human-check.sh` получает дедлайн ... auto, no owner response by <ts>») instead of the fabricated `auto-ACCEPTED` phrase.
+- Q5 `answer:` `drone-acceptance | cycle-clerk` -> `drone-acceptance.md | autonomous-cycle-05` (major 3: `cycle-clerk` is an agent ADDED in commit `7d243a9`, not the retired one - an answer naming only `cycle-clerk` was scoring `hit:true` for the wrong agent). Verified `drone-acceptance.md`: `cd E:/Projects/vulyk && git show 7d243a9 --stat` shows `.claude/agents/drone-acceptance.md | 82 ----` deleted-only in that commit. Verified `autonomous-cycle-05`: `git grep -lF -- 'autonomous-cycle-05'` lists `docs/specs/autonomous-cycle/autonomous-cycle-05-council-agents.md` (the story that retires the agent) among others; neither string is a substring of the Q5 question line. `cycle-clerk` removed from both `answer:` and `source:` lines (grep confirms it is now absent from the whole file).
+- `bash scripts/redact.sh < examples/vulyk/golden-questions.md` diffs empty against the file. File written/edited with LF-only line endings throughout (`grep -c $'\r' examples/vulyk/golden-questions.md` = 0).
 
 ## Findings
