@@ -59,3 +59,4 @@ Contracts C1, C2, C4, C5, C6 in plan.md. `recon/vulyk-hooks.md` "manual modes mu
 
 ## Findings
 - Open question for the planner/Queen: AC 7 and Non-goal 4 of this story ask for opposite things. Resolved in favour of the Non-goal (the plan's wave-3/4 gate also assigns the real run to the owner). If the slash form fails in `claude -p`, the one-line change is the invocation in `cmd_bench` plus the `slash command form` assertion in `tests/bench.test.sh`.
+- Queen note after the real run (2026-09-21, E:/Projects/vulyk): `hits 5/5 · refs 7/9 · 140s`, 5 rows, slash-command form worked. Every row has `tokens_in: 0`, `tokens_out: 0` while `cost_usd` is non-zero: `usage.input_tokens` in `claude -p` JSON is the uncached slice only (2 tokens in a probe); the bulk sits in `cache_creation_input_tokens`/`cache_read_input_tokens`. bench implements C5 as written; C5 itself needs the cache fields in phase 2.

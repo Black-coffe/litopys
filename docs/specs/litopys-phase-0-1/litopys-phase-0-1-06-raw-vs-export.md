@@ -18,6 +18,14 @@ After this story `docs/specs/litopys-phase-0-1/recon/raw-vs-export.md` exists an
 
 **Needs a human first.** The owner runs one real VULYK session past 100k tokens with `claude --plugin-dir E:/Projects/litopys`, then `/export` in that same session to a file, and gives the worker both paths: the journal `E:/Projects/vulyk/.litopys/raw/<session_id>.md` and the export file. The worker does not run the session.
 
+## Inputs (provided by the Queen, 2026-09-21, on the owner's authority)
+The human precondition is met. Both files exist; do not run any session yourself.
+- Session id: `a10ea931-a24f-4942-aa20-743c4eeb9e4a`, project E:/Projects/vulyk, 2026-09-21, run under `claude --plugin-dir E:/Projects/litopys` (five `claude -p -r` turns with tool use, then one interactive resume for `/export` and `/exit`).
+- Raw journal: `E:/Projects/vulyk/.litopys/raw/a10ea931-a24f-4942-aa20-743c4eeb9e4a.md`
+- Export: `E:/Projects/vulyk/.litopys/export-a10ea931.md` (written by `/export` inside that session).
+- Token count as Claude Code reported it (`--output-format json` usage per turn, input+cache_creation+cache_read): turn 1 129,774 · turn 2 160,046 · turn 3 570,413 (7 model calls, tool loop) · turn 4 218,625 · turn 5 128,088 (drop after turn 4 = auto-compaction candidate, check the export); output 302+1,079+2,198+8,601+736; total cost USD 2.38. Well past the 100k bar.
+- Both files live under a gitignored `.litopys/`; quote at most a few lines per finding.
+
 ## Requirements
 > Проверка на одной реальной сессии VULYK ≥100k токенов: сырой журнал сравнивается с `/export` той же сессии; отчёт `docs/specs/litopys-phase-0-1/recon/raw-vs-export.md` называет, что журнал теряет.
 
