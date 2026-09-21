@@ -148,4 +148,5 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 **Branch:** vulyk/litopys-phase-0-1
 **Checked:**
 **Council:**
+**Council:** RED round 1, 2026-09-21, at ac03fbe, pack ac71211211e9 - red: 4
 **Shipped:**
