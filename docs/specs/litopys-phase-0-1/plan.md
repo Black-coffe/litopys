@@ -143,7 +143,7 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 
 ## Plan deltas
 
-**Approved:** <owner, date - stage 02, the unconditional gate. /vulyk-build refuses without this line.>
+**Approved:** Andrei, 2026-09-21 (in the vulyk session that ran the grill; build runs from a session inside E:/Projects/litopys)
 **Briefed:**
 **Branch:**
 **Checked:**
