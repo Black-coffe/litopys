@@ -166,7 +166,7 @@ delta vs baseline · hits 4/5 -> 5/5 (+1) · refs 7/8 -> 8/8 (+1) · seconds 143
 <!--
 The six lines below are the cycle's confirmation artifacts (docs/cycle.md); scripts fill them.
 -->
-**Approved:**
+**Approved:** Andrei, 2026-09-21 (one word in the litopys session; gates A and B run by the Queen on the owner's standing authorisation)
 **Briefed:**
 **Branch:**
 **Checked:**
