@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# VULYK secret redaction - deterministic stdin->stdout filter, no model, no tokens.
+# Secret redaction - deterministic stdin->stdout filter, no model, no tokens.
 #
 #   Usage: some-writer | scripts/redact.sh > file
 #
-# Masks well-known credential shapes before transcript-derived text is written to
-# disk. Wired into the two writers that persist free text a human once typed or
-# pasted: session-end-learnings.sh (memory/learnings/ - committed to git) and
-# handoff.py (.claude/handoff/ - gitignored, but re-injected into future sessions
-# and routinely shared). The patterns are intentionally loud rather than clever:
-# a false positive costs one unreadable line, a false negative costs a rotation.
+# VULYK's scripts/redact.sh, copied verbatim below this header: masks well-known
+# credential shapes before transcript-derived text is written to disk. Callers in
+# this plugin: `bin/litopys append` (--note and --ref, C3) and `bin/litopys distill
+# record` (the whole session record, C11) - everything litopys puts into git.
 #
-# handoff.py mirrors a minimal subset of these patterns as a built-in fallback for
-# environments where bash is missing - if you extend this list, extend that one too.
+# This copy is the fallback, not the authority: the host project's own
+# scripts/redact.sh wins whenever it exists, then ${CLAUDE_PLUGIN_ROOT}/scripts/
+# redact.sh, then this file next to bin/ (C16). Keep the body byte-identical to
+# VULYK's, mask [VULYK:REDACTED] included - if you extend the pattern list there,
+# re-copy here.
 #
-# This is the only VULYK script that transforms instead of reports. It still never
+# This is the only script here that transforms instead of reports. It still never
 # blocks: if the tools are missing or the sed dialect rejects the expressions, it
-# degrades to `cat` (the text passes unredacted) because eating a handoff entirely
+# degrades to `cat` (the text passes unredacted) because eating a record entirely
 # would be a silent-loss path of its own. Exit status is always 0.
-
 set -u
 
 MASK='[VULYK:REDACTED]'

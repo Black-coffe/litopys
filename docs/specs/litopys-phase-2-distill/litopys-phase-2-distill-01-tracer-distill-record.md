@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-01
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: opus
@@ -62,5 +62,23 @@ blocked_by: []
 Layers this slice must cut through: journal parser (frontmatter + block headers, C13 rule) -> record assembly (C11) -> redactor resolution (C16) -> chronicle append (C3 path, new kind) -> journal move (C12 layout, `done/` only) -> cost row (C14 jsonl) -> test with a stub-free fixture pair. If the parser or the record shape wants to differ from C11/C13, report it in the INTERFACES line rather than improvising - stories 03 and 04 build against these contracts in parallel.
 
 ## Implementation notes
+- Files: `bin/litopys` (KINDS +`session`, usage block, `redactor()`/`redact_filter()` C16 helpers,
+  C3 ref normalise+redact in `cmd_append`, new `cmd_distill`/`distill_record`/`csv_list`/`json_str`/`bytes`),
+  `scripts/redact.sh` (header only, 20 lines so the body still starts at line 21 in both copies),
+  `tests/distill.test.sh` (new), `tests/append.test.sh`, `tests/fixtures/raw-resume.md`, `tests/fixtures/distill-body.md`.
+- `redactor()` takes an optional root argument (defaults to `project_root()`) so `cmd_append`/`distill_record`
+  do not resolve the root twice; it prints the literal `cat` when none of the three paths exists and
+  `redact_filter` turns that into a plain `cat` (C16's "none -> cat" without ever running `bash cat`).
+- The record is written through a `.tmp.$$` file and `mv`, so a redactor that dies mid-stream cannot leave
+  a half-record on disk; the fallback then writes the unredacted record, as C16's best-effort rule says.
+- Body validation is strict equality on the section list (`Decisions Problems Brainstorm Links`), which also
+  rejects a fifth section - matches the story's non-goal, and is the same check for "missing" and "out of order".
+- Surprise: with C16 the *plugin's* copy is always reachable in this repo, so `tests/append.test.sh`'s old
+  "no redact.sh -> passthrough" case can only be reproduced by copying `bin/litopys` out of the repo with
+  `CLAUDE_PLUGIN_ROOT` unset - that is now its own case beside the plugin-fallback one.
+- Surprise: a host `redact.sh` that masks every line also masks the chronicle `--ref` (C3 amended sends the
+  ref through the same filter), so the HOSTMASK test asserts `· session · HOSTMASK · HOSTMASK`.
+- `tokens_est` and the record's `tokens` are the same integer; the test derives the expectation from the
+  row's own `journal_bytes`/`body_bytes` and independently checks those two against the fixtures' sizes.
 
 ## Findings

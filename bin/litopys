@@ -2,6 +2,7 @@
 # litopys CLI - deterministic chronicle writer, no model, no tokens.
 #
 #   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
+#          bash bin/litopys distill record --journal <raw.md> --body <body.md|->
 #          bash bin/litopys bench
 #          bash bin/litopys --version | help
 #
@@ -14,13 +15,17 @@
 set -u
 
 VERSION="0.1.0"
-KINDS="grill brief verdict ship handoff note"
+KINDS="grill brief verdict ship handoff note session"
 
 usage() {
   cat >&2 <<EOF
 litopys $VERSION
   litopys append --kind <$(echo "$KINDS" | tr ' ' '|')> --ref <path|sha> [--note "<text>"]
       Append one dated line to <root>/docs/chronicle/YYYY-MM.md. Idempotent on (ts, kind, ref).
+  litopys distill record --journal <raw.md> --body <body.md|-> [--topics a,b] [--links x,y]
+                         [--source live|backfill] [--model <m>] [--force]
+      Turn one raw journal plus one distilled body into docs/chronicle/sessions/<date>-<sid8>.md,
+      append one session line to the monthly chronicle, move the journal to .litopys/raw/done/.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
@@ -45,6 +50,25 @@ project_root() {
     return 0
   fi
   printf '%s\n' "$PWD"
+}
+
+# C16 - which secret filter runs. The host project's own scripts/redact.sh wins (its patterns
+# are the ones its owner maintains), then the plugin's shipped copy, then the copy next to this
+# script when CLAUDE_PLUGIN_ROOT is unset. None of the three present -> `cat`: redaction is
+# best-effort and never a gate, exactly as it was when only the host copy counted.
+redactor() { # redactor [root] - print a filter path, or the literal `cat`
+  local root="${1:-$(project_root)}" here
+  if [ -f "$root/scripts/redact.sh" ]; then printf '%s\n' "$root/scripts/redact.sh"; return 0; fi
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh" ]; then
+    printf '%s\n' "${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh"; return 0
+  fi
+  here="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)"
+  if [ -n "$here" ] && [ -f "$here/scripts/redact.sh" ]; then printf '%s\n' "$here/scripts/redact.sh"; return 0; fi
+  printf '%s\n' "cat"
+}
+
+redact_filter() { # redact_filter <redactor-path> - stdin -> stdout, `cat` when there is none
+  if [ "$1" = "cat" ]; then cat; else bash "$1"; fi
 }
 
 cmd_append() {
@@ -82,13 +106,27 @@ cmd_append() {
   ts="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   month="$(printf '%s' "$ts" | cut -c1-7)"
 
-  # Secrets never reach a committed chronicle line; redact.sh is a passthrough filter that
-  # always exits 0, so its absence costs the note nothing (C3).
-  if [ -n "$note" ] && [ -f "$root/scripts/redact.sh" ]; then
-    note="$(printf '%s\n' "$note" | bash "$root/scripts/redact.sh" 2>/dev/null || printf '%s' "$note")"
+  # Secrets never reach a committed chronicle line. Both fields go through the same C16 filter
+  # (host copy first, plugin copy second) - its absence is impossible to rely on, and a failure
+  # of the filter falls back to the unfiltered text rather than dropping the record (C3).
+  local filter
+  filter="$(redactor "$root")"
+  if [ -n "$note" ]; then
+    note="$(printf '%s\n' "$note" | redact_filter "$filter" 2>/dev/null || printf '%s' "$note")"
   fi
   # One record = one line: newlines, carriage returns and tabs collapse to spaces.
   note="$(printf '%s' "$note" | tr '\n\r\t' '   ')"
+
+  # C3 amended: --ref is normalised to one line, its ' · ' separators neutralised so a ref can
+  # never forge a second field, and then redacted like --note. A ref that is empty afterwards
+  # would write a record nothing can be keyed on.
+  ref="$(printf '%s' "$ref" | tr '\n\r\t' '   ')"
+  ref="${ref// · / - }"
+  ref="$(printf '%s\n' "$ref" | redact_filter "$filter" 2>/dev/null || printf '%s' "$ref")"
+  ref="$(trim "$ref")"
+  if [ -z "$ref" ]; then
+    echo "litopys append: --ref is empty after normalisation" >&2; usage; return 2
+  fi
 
   file="$root/docs/chronicle/$month.md"
   if [ ! -f "$file" ]; then
@@ -294,11 +332,222 @@ cmd_bench() {
   return 0
 }
 
+# --- distill (C11-C14) ---------------------------------------------------------------------
+# `distill record` is the model-free half of distillation: the forked distiller agent reads a
+# raw journal and writes a body; this turns the pair into the git-tracked session record. It
+# validates everything it can before it writes anything - a rejected body must leave the
+# journal exactly where it was, still distillable.
+
+csv_list() { # csv_list "a, b" -> "[a, b]"   (empty -> "[]")
+  local raw="$1" out="" item
+  local -a parts=()
+  IFS=',' read -r -a parts <<< "$raw"
+  for item in ${parts[@]+"${parts[@]}"}; do
+    item="$(trim "$item")"
+    [ -n "$item" ] || continue
+    if [ -z "$out" ]; then out="$item"; else out="$out, $item"; fi
+  done
+  printf '[%s]' "$out"
+}
+
+json_str() { # json_str <text> - minimal JSON string escaping (no jq dependency here)
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+bytes() { # bytes <file> - size in bytes, digits only
+  wc -c < "$1" 2>/dev/null | tr -dc '0-9'
+}
+
+distill_record() {
+  local journal="" bodyarg="" topics="" links="" source="live" model="sonnet" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --journal|--body|--topics|--links|--source|--model)
+        if [ $# -lt 2 ]; then
+          echo "litopys distill record: $1 needs a value" >&2; usage; return 2
+        fi
+        case "$1" in
+          --journal) journal="$2" ;;
+          --body)    bodyarg="$2" ;;
+          --topics)  topics="$2" ;;
+          --links)   links="$2" ;;
+          --source)  source="$2" ;;
+          --model)   model="$2" ;;
+        esac
+        shift 2
+        ;;
+      --force) force=1; shift ;;
+      *) echo "litopys distill record: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+
+  if [ -z "$journal" ]; then
+    echo "litopys distill record: --journal is required" >&2; usage; return 2
+  fi
+  if [ ! -f "$journal" ]; then
+    echo "litopys distill record: no journal at $journal" >&2; return 2
+  fi
+  if [ -z "$bodyarg" ]; then
+    echo "litopys distill record: --body is required" >&2; usage; return 2
+  fi
+  if [ "$bodyarg" != "-" ] && [ ! -f "$bodyarg" ]; then
+    echo "litopys distill record: no body at $bodyarg" >&2; return 2
+  fi
+  case "$source" in
+    live|backfill) : ;;
+    *) echo "litopys distill record: --source must be live or backfill (got '$source')" >&2; return 2 ;;
+  esac
+  [ -n "$model" ] || model="sonnet"
+
+  # --- journal: frontmatter + C13 block scan -----------------------------------------------
+  local sid="" started="" branch="" line key val fm=0 last_header="" ended="-"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
+    if [ "$fm" -eq 1 ]; then
+      if [ "$line" = "---" ]; then fm=2; continue; fi
+      key="${line%%:*}"; val="$(trim "${line#*:}")"
+      case "$key" in
+        session_id) sid="$val" ;;
+        started)    started="$val" ;;
+        branch)     branch="$val" ;;
+      esac
+      continue
+    fi
+    case "$line" in '## '*) last_header="$line" ;; esac
+  done < "$journal"
+
+  if [ -z "$sid" ]; then
+    echo "litopys distill record: $journal has no session_id in its frontmatter" >&2; return 2
+  fi
+  # C13: one journal = one record whatever the number of closed/compact markers. `ended` is the
+  # last `## closed` only when it is also the file's last block - anything after it is a resume.
+  case "$last_header" in
+    '## closed'*)
+      ended="$(trim "${last_header#'## closed'}")"
+      ended="$(trim "${ended#·}")"
+      ended="$(trim "${ended%%·*}")"
+      ;;
+  esac
+  [ -n "$ended" ] || ended="-"
+  [ -n "$branch" ] || branch="-"
+
+  # --- body: one title, the four C11 sections, in order ------------------------------------
+  local body title="" first=1
+  local -a secs=()
+  if [ "$bodyarg" = "-" ]; then body="$(cat)"; else body="$(cat "$bodyarg")"; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$first" -eq 1 ]; then
+      [ -n "$(trim "$line")" ] || continue
+      case "$line" in
+        '# '*) title="$(trim "${line#\# }")"; first=0; continue ;;
+        *) echo "litopys distill record: body must start with a '# <title>' line" >&2; return 2 ;;
+      esac
+    fi
+    case "$line" in '## '*) secs+=("$(trim "${line#\#\# }")") ;; esac
+  done <<< "$body"
+
+  if [ "$first" -eq 1 ] || [ -z "$title" ]; then
+    echo "litopys distill record: body is empty or has no '# <title>' line" >&2; return 2
+  fi
+  if [ "${secs[*]:-}" != "Decisions Problems Brainstorm Links" ]; then
+    echo "litopys distill record: body needs exactly '## Decisions', '## Problems', '## Brainstorm', '## Links' in that order (got: ${secs[*]:-none})" >&2
+    return 2
+  fi
+
+  # --- paths -------------------------------------------------------------------------------
+  local root now rdate sid8 sidsafe rel file
+  root="$(project_root)"
+  now="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  if [ -n "$started" ]; then
+    rdate="$(printf '%s' "$started" | cut -c1-10)"
+  else
+    rdate="$(printf '%s' "$now" | cut -c1-10)"; started="-"
+  fi
+  sid8="$(printf '%s' "$sid" | cut -c1-8)"
+  sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
+  rel="docs/chronicle/sessions/$rdate-$sid8.md"
+  file="$root/$rel"
+
+  if [ -f "$file" ] && [ "$force" -ne 1 ]; then
+    echo "litopys distill record: record exists: $rel (use --force)" >&2; return 2
+  fi
+
+  # --- assemble, redact, write (C11/C16) ---------------------------------------------------
+  local jbytes bbytes tokens filter record tmp
+  jbytes="$(bytes "$journal")"; jbytes="${jbytes:-0}"
+  bbytes="$(printf '%s\n' "$body" | wc -c | tr -dc '0-9')"; bbytes="${bbytes:-0}"
+  tokens=$(( (jbytes + bbytes) / 4 ))
+
+  record="$(cat <<RECORD
+---
+litopys: session
+version: 1
+date: $rdate
+session_id: $sid
+started: $started
+ended: $ended
+branch: $branch
+topics: $(csv_list "$topics")
+links: $(csv_list "$links")
+source: $source
+tokens: $tokens
+model: $model
+---
+$body
+RECORD
+)"
+
+  if ! mkdir -p "$root/docs/chronicle/sessions"; then
+    echo "litopys distill record: cannot create $root/docs/chronicle/sessions" >&2; return 2
+  fi
+  filter="$(redactor "$root")"
+  tmp="$file.tmp.$$"
+  if printf '%s\n' "$record" | redact_filter "$filter" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    printf '%s\n' "$record" > "$file"
+  fi
+
+  # --- one chronicle line, through cmd_append's own path (one writer for the monthly file) --
+  cmd_append --kind session --ref "$rel" --note "$title" > /dev/null || true
+
+  # --- the journal leaves the queue (C12: done/ only) --------------------------------------
+  if mkdir -p "$root/.litopys/raw/done"; then
+    [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
+    mv -f "$journal" "$root/.litopys/raw/done/$sidsafe.md" 2>/dev/null || true
+  fi
+
+  # --- one C14 cost row --------------------------------------------------------------------
+  if mkdir -p "$root/.litopys"; then
+    printf '{"ts":"%s","session_id":"%s","record":"%s","journal_bytes":%s,"body_bytes":%s,"tokens_est":%s,"model":"%s","source":"%s","litopys":"%s"}\n' \
+      "$(json_str "$now")" "$(json_str "$sid")" "$(json_str "$rel")" "$jbytes" "$bbytes" "$tokens" \
+      "$(json_str "$model")" "$(json_str "$source")" "$(json_str "$VERSION")" \
+      >> "$root/.litopys/distill.jsonl"
+  fi
+
+  printf '%s\n' "$rel"
+  return 0
+}
+
+cmd_distill() {
+  local verb="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$verb" in
+    record) distill_record "$@"; return $? ;;
+    "") echo "litopys distill: a verb is required (record)" >&2; usage; return 2 ;;
+    *) echo "litopys distill: unknown verb '$verb'" >&2; usage; return 2 ;;
+  esac
+}
+
 SUB="${1:-help}"
 [ $# -gt 0 ] && shift
 case "$SUB" in
   append) cmd_append "$@"; exit $? ;;
   bench) cmd_bench "$@"; exit $? ;;
+  distill) cmd_distill "$@"; exit $? ;;
   --version|-v|version) echo "$VERSION"; exit 0 ;;
   help|--help|-h) usage; exit 0 ;;
   *) echo "litopys: unknown subcommand '$SUB'" >&2; usage; exit 2 ;;
