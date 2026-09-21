@@ -21,6 +21,7 @@ Turn the empty `litopys` repo into a loadable Claude Code plugin that does two m
 - **Chronicle notes pass through the host's `scripts/redact.sh`** when that file exists (VULYK hosts have it), else unredacted passthrough. Golden questions (story 03) are the other git-bound text: the worker pipes the finished file through `scripts/redact.sh` (present in this repo via VULYK) before returning, so every git-bound path this phase writes passes redact (Ask 7).
 - **Plugin version** starts at `0.1.0` in `plugin.json`.
 - **Ask 7's «ничего не пишется в CLAUDE.md» is read as a runtime constraint on the plugin** (no hook, CLI, skill or agent writes any project's CLAUDE.md), not as a freeze on this repo's own constitution, which the Queen edits as project paperwork (`## Commands` rows). Council seats judge the runtime reading.
+- **Ask 6's comparison is journal vs `/export` only** (story 06 non-goal 1). The `.pty.log` sidecar the owner left beside the export is evidence about the terminal, not about either compared file; the report may keep it in a separate section but no `## Losses` item may rest on it. Fix round 2 story 09 enforces this reading; the Queen confirms it before dispatch if the owner meant the pty capture to count as "the export".
 
 ## Stories
 
@@ -46,9 +47,12 @@ Turn the empty `litopys` repo into a loadable Claude Code plugin that does two m
 - `litopys-phase-0-1-07-bench-tokens` (opus, blocked by 04) - `bin/litopys` bench sums cache-inclusive token fields (revised C5), treats `is_error:true` as a failed call; stub + `tests/bench.test.sh` updated.
 - `litopys-phase-0-1-08-golden-keyphrases` (sonnet, blocked by 03) - `examples/vulyk/golden-questions.md`: keyphrases that cannot match their own question, refs that are path-or-sha7 only, no keyphrase doubling as a ref.
 
-**Gate after wave 6 (Queen, terminal):** re-copy `examples/vulyk/golden-questions.md` to `E:/Projects/vulyk/docs/chronicle/golden-questions.md`, re-run `bash E:/Projects/litopys/bin/litopys bench` inside E:/Projects/vulyk, confirm five new rows with non-zero `tokens_in`/`tokens_out`, then open round 2.
+**Gate after wave 6 (Queen, terminal):** re-copy `examples/vulyk/golden-questions.md` to `E:/Projects/vulyk/docs/chronicle/golden-questions.md`, re-run `bash E:/Projects/litopys/bin/litopys bench` inside E:/Projects/vulyk, confirm five new rows with non-zero `tokens_in`/`tokens_out`, then open round 2. **Not run before round 2 (review round 2 critical 1) - still owed before round 3.**
 
-Build agent count: 6 workers (3 opus, 3 sonnet) + full court (`council-sonnet`, `council-opus`, `council-haiku`) + `lead-review` = 10 agent dispatches, plus retries; fix round 1 adds 2 workers (1 opus, 1 sonnet) and one council round.
+**Wave 7 - fix round 2, Ask 6** (council RED at 3c23c80: seat sonnet RED because `recon/raw-vs-export.md` is absent from the court; lead-review BLOCK, major 5: Losses 3-4 sourced from the `.pty.log`, not from the journal or `/export`)
+- `litopys-phase-0-1-09-raw-vs-export-losses` (sonnet, blocked by 06) - `recon/raw-vs-export.md`: every `## Losses` item checkable in the two named files; pty-log observations moved to `## Outside the comparison (pty log)`; Header names the sidecar; Verdict reworded where it leaned on a pty-only loss.
+
+Build agent count: 6 workers (3 opus, 3 sonnet) + full court (`council-sonnet`, `council-opus`, `council-haiku`) + `lead-review` = 10 agent dispatches, plus retries; fix round 1 adds 2 workers (1 opus, 1 sonnet) and one council round; fix round 2 adds 1 worker (sonnet) and one council round.
 
 ## Contracts
 
@@ -134,6 +138,8 @@ branch: <git branch or ->
 ```
 When jq is missing, one static line: `[litopys] jq not found - raw journal disabled`.
 
+**C10 - raw-vs-export report sections (06 writes, 09 corrects).** `recon/raw-vs-export.md` holds, in order, `## Header`, `## Losses`, `## Kept`, `## Outside the comparison (pty log)`, `## Verdict`. Every `## Losses` item cites only the journal or the export file (a `grep` pattern or a line/block reference); anything sourced from the `.pty.log` sidecar lives under `## Outside the comparison` and nowhere else.
+
 ## Integration gate
 `for t in tests/*.test.sh; do bash "$t" || exit 1; done && git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null && claude plugin validate .`
 Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
@@ -145,22 +151,24 @@ Before each dispatch: `bash scripts/wave-check.sh docs/specs/litopys-phase-0-1`.
 - **Bench via `claude -p` with a stub in tests vs an in-session skill.** Chose the CLI: tokens, cost and duration are in the JSON output, and the run is reproducible from a terminal. Rejected an in-session `/litopys:bench` skill: no clean token count per question, and it would pollute the measuring session.
 - **Fix round 1: cache-inclusive `tokens_in` vs adding separate cache columns.** Chose to fold cache creation + cache read into `tokens_in` and keep the C5 keys: the ask names one «токены» figure, D12's ceiling is about total spend, and every consumer (phase-2 comparison, the 5% check) wants one number. Rejected new `tokens_cache_*` keys: a wider row for phase 0 with no reader, and a baseline whose columns differ from what phase 2 will re-measure.
 - **Fix round 1: two stories vs one.** Chose two: `bin/litopys`+fixtures (bash/JSON work, opus) and `examples/vulyk/golden-questions.md` (VULYK-history research, sonnet) share no file and no mental model, so the neighbour test fails and they run in parallel. Rejected one story: a worker fixing jq sums would re-derive five historical facts for no reason.
+- **Fix round 2: move pty-log findings to their own section vs delete them.** Chose a separate `## Outside the comparison (pty log)` section: the observations (slash-command trace, terminal banner) are real phase-2 input and cost nothing to keep, while the ask's `## Losses` list becomes checkable in exactly the two files it names. Rejected deletion: it throws away verified evidence to satisfy a section boundary, and the next reader would rediscover it from the same sidecar.
 
 ## Descoped
 
-*(empty)*
+- Review round 2 major 4 / round-1 major 5: `bin/litopys append --ref` containing a newline or the ` · ` separator is not normalised, so a multi-line ref writes a two-line record and defeats (ts, kind, ref) idempotence. Not in fix round 2 (Ask 6 only); the Queen decides between a wave-8 story on `bin/litopys` + `tests/append.test.sh` or a permanent descope line here.
+- Review round 2 minors 6-13 and opus seat UNASKED (a)-(e), plus round-1 minors 9, 12, 13, 14: none named by round 2's unresolved-ask list; each needs either a story or a line here before round 3 - listed for the Queen, not cut by this planner.
 
 ## Plan deltas
 
 - 2026-09-21, round 1: the "baseline before hooks" gate was not held - wave 4 was built before `bench` ran in E:/Projects/vulyk (the gate watcher never started; `setsid` is absent in Git Bash). The baseline was measured afterwards, before story 06's session, so the raw journal never fed recall; the ordering intent (baseline uninfluenced by phase 1 output) holds, the wave order did not.
 - 2026-09-21, round 1 -> wave 6: Ask 4's «токены» were not delivered in phase 0 as built (all real rows `tokens_in:0, tokens_out:0`); C5 revised, stories 07 and 08 cut, baseline to be re-run after wave 6 before round 2. The round-1 rows in `E:/Projects/vulyk/.litopys/baseline.jsonl` stay on disk as history but are not the phase-0 number.
 - Open to the Queen (not in wave 6): bench sessions run through `claude -p` are journalled by the plugin's own hooks (review major 1) - the banner counts them and a phase-2 distiller would ingest them; decide whether bench sets an env marker the hooks honour (touches Ask 5 files) or whether phase 2 filters `## user` blocks that begin with `/litopys:recall`.
+- 2026-09-21, round 2 -> wave 7: Ask 6 left unresolved. Story 09 cut (report only, C10 added). The wave-6 gate (re-copy golden questions, re-run bench in VULYK, confirm non-zero tokens) was promised "before round 2" and did not run (review critical 1); it is owed before round 3 and is a Queen terminal step, not a story. Two round-2 findings on Ask 6 have no story because they are not report defects: the sonnet seat's RED is court setup (`docs/specs/<slug>/` reduced to `brief.md`, so `recon/` is invisible to every seat) - either the court must carry `recon/raw-vs-export.md` or Ask 6 is judged by `lead-review` alone and the seats mark it N/A as opus and haiku did.
 
 **Approved:** Andrei, 2026-09-21 (in the vulyk session that ran the grill; build runs from a session inside E:/Projects/litopys)
 **Briefed:**
 **Branch:** vulyk/litopys-phase-0-1
 **Checked:**
-**Council:**
 **Council:** RED round 1, 2026-09-21, at ac03fbe, pack ac71211211e9 - red: 4
 **Council:** RED round 2, 2026-09-21, at ebda9de, pack e16ac0b7e26a - red: 6
 **Shipped:**
