@@ -67,6 +67,8 @@ Expected: five new rows appended to `.litopys/baseline.jsonl` (rows 1-5 remain t
 
 Gate A is re-run after wave 5 in a VULYK checkout with the resumed-fragment journal present (expected: `ffab22c9`-style fragment skipped, no new fragment created, the commit's `--stat` lists only the record and month file). Gate B is not re-run - nothing in wave 5 touches `bench`.
 
+**Result (gate A re-run, 2026-09-21 16:5xZ, wave-5 code, run by the Queen):** `Distilled: 0`, `Skipped: 6` (the `ffab22c9` fragment plus the five journals of gate B's bench run), `Commit: nothing pending`, `Pending: 1` = the running session's own open journal, left in place and not distilled; no new fragment created, `distill.jsonl` unchanged at two rows, VULYK HEAD still `ba151a2`. Cost 0.164 USD. Behaviour matches critical 1's condition.
+
 Build agent count: 8 workers (4 opus: 01, 03, 05, 07; 4 sonnet: 02, 04, 06, 08) + full court (`council-sonnet`, `council-opus`, `council-haiku`) + `lead-review` = 12 dispatches, plus retries (a missed sonnet story retries on opus).
 
 ## Contracts

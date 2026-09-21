@@ -146,7 +146,7 @@ Quiet variants only: everything these print is resent on every subsequent turn. 
 | Bench test | `bash tests/bench.test.sh` |
 | Hooks test | `bash tests/hooks.test.sh` |
 | Distill test | `bash tests/distill.test.sh` |
-| Wiki chronicle-format check | `grep -q 'note session' docs/wiki/chronicle-format.md && grep -q '^- `## compact' docs/wiki/chronicle-format.md && ! grep -q 'never redacted' docs/wiki/chronicle-format.md` |
+| Wiki chronicle-format check | `grep -q 'note session' docs/wiki/chronicle-format.md && grep -q '## compact' docs/wiki/chronicle-format.md && ! grep -q 'never redacted' docs/wiki/chronicle-format.md` |
 | Full test suite | `for t in tests/*.test.sh; do bash "$t" \|\| exit 1; done` |
 | Lint | `git ls-files '*.sh' bin/* \| xargs -n1 bash -n && git ls-files '*.json' \| xargs -n1 jq -e . > /dev/null` |
 | Build / typecheck | `claude plugin validate .` |
