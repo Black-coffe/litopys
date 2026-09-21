@@ -32,7 +32,8 @@ After this story `examples/vulyk/golden-questions.md` (in this repo; copied to `
 ## Map slice
 Contract C4 in plan.md (file shape). Sources to read, all in E:/Projects/vulyk: `git log --oneline --reverse | head -80`, `git tag`, `CHANGELOG.md`, `docs/adr/*.md` (ADR-001 and ADR-007 at least), `docs/specs/*/brief.md`, `docs/grill/*.md`.
 
-## Acceptance criteria
+## Acceptance
+- The finished file has been passed through `bash scripts/redact.sh` (stdin→stdout) and the redacted output is what is committed; the diff between the two is empty or explained in Implementation notes. criteria
 - [ ] File follows C4 exactly: header, one HTML comment naming date and sources, five `## Q<n> · ` sections each with `- answer:`, `- refs:`, `- source:`.
 - [ ] Q1 is the mandated compound question, worded in Russian as the brief has it: «что было в релизе до 0.1, как брейнштормили, что устарело». Its `answer:` lists keyphrases that a correct answer must contain (e.g. the earliest tag or version string and the ADR or grill that was superseded); its `refs:` name the CHANGELOG section and at least one sha7 or ADR file.
 - [ ] The other four cover different eras or kinds of fact: one about a version's headline change, one about an ADR decision and why, one about a grill or spec decision, one about something that was later removed or replaced. No two questions share a ref.

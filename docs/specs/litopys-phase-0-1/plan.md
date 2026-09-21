@@ -18,7 +18,7 @@ Turn the empty `litopys` repo into a loadable Claude Code plugin that does two m
 - **Baseline before hooks is a build gate.** Wave 4 is not dispatched until `E:/Projects/vulyk/.litopys/baseline.jsonl` holds five rows. The owner (or the Queen from a terminal) runs `bench` inside VULYK with `--plugin-dir E:/Projects/litopys` between waves 3 and 4.
 - **Story 06 needs a human.** Someone must run one real VULYK session past 100k tokens with the plugin loaded, then `/export` it. The worker only compares and writes the report. Its verification is a `grep` on the report file, not a test from `## Commands` - there is no test to write for a document.
 - **`UserPromptSubmit` field name.** The brief says `user_input`; the hook reads `.user_input // .prompt` so either official name works. Recon question for the scout: confirm the field name in `docs/en/hooks` and whether `/litopys:recall` is invocable in `claude -p`.
-- **Chronicle notes pass through the host's `scripts/redact.sh`** when that file exists (VULYK hosts have it), else unredacted passthrough. That is the only git-bound text this phase writes besides golden questions, which a human writes.
+- **Chronicle notes pass through the host's `scripts/redact.sh`** when that file exists (VULYK hosts have it), else unredacted passthrough. Golden questions (story 03) are the other git-bound text: the worker pipes the finished file through `scripts/redact.sh` (present in this repo via VULYK) before returning, so every git-bound path this phase writes passes redact (Ask 7).
 - **Plugin version** starts at `0.1.0` in `plugin.json`.
 
 ## Stories
