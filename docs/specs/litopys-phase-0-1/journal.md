@@ -12,3 +12,5 @@
 - 2026-09-21T13:32:34Z · 03-building · close-story exit 2 (story 08) · next: verification cell added to ## Commands, story 08 closed by hand, relaunching
 - 2026-09-21T13:33:01Z · 04-council:open · round 2 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-2 · next: dispatch:haiku,sonnet,opus,review
 - 2026-09-21T13:42:23Z · 04-council:RED · round 2 verdict RED at ebda9de pack e16ac0b7e26a · next: repair
+- 2026-09-21T14:03:52Z · 03-building · wave 8 closed, baseline gate re-run · next: story 10 closed by the Queen-dispatched worker; bench in VULYK: hits 4/5 · refs 7/8 · 143s with real tokens - the phase-0 number; relaunching for round 3
+- 2026-09-21T14:04:26Z · 04-council:open · round 3 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-3 · next: dispatch:haiku,sonnet,opus,review
