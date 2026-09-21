@@ -15,7 +15,7 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 KINDS="grill brief verdict ship handoff note session"
 
 usage() {
@@ -37,6 +37,9 @@ litopys $VERSION
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
+  litopys bench --delta
+      Print the last five rows of <root>/.litopys/baseline.jsonl against its first five
+      (hits, refs, seconds, tokens, cost) - no model call. Fewer than ten rows exits 2.
   litopys --version       Print $VERSION.
   litopys help            This text.
 
@@ -162,18 +165,23 @@ trim() { # trim <string> - strip leading and trailing whitespace
   printf '%s' "$s"
 }
 
-# C5 token extraction. `claude -p --output-format json` reports the input side in three fields
-# and a forked skill's *uncached* `input_tokens` is a couple of tokens while cache creation and
-# cache read carry the actual spend (live probe: input 2, cache_creation 50520, cache_read 0,
-# output 4) - reading the uncached slice alone made every real baseline row read 0 (round-1
-# seat, Ask 4). So `tokens_in` is the sum of all three. `modelUsage` is the same information
-# per model in camelCase; it is the fallback when a top-level `usage` object exists but is
-# all-zero. `null` is written only when neither object is present at all.
+# C5 token extraction. `claude -p --output-format json` reports the input side in three fields:
+# `usage.input_tokens` alone is the *uncached* slice - a couple of tokens per call - while cache
+# creation and cache read carry the actual spend (live probe: input 2, cache_creation 50520,
+# cache_read 0, output 4). Reading `input_tokens` alone read ~0 on every real row in round 1
+# (Ask 4), so `tokens_in` sums all three input fields instead. `modelUsage` is the same
+# information per model in camelCase; it is the fallback when a top-level `usage` object exists
+# but is all-zero. `null` is written only when neither object is present at all. Within one
+# object, snake_case and camelCase are never both summed - each field prefers its snake_case
+# value when present, falling back to camelCase only when the snake field is absent, so a
+# payload carrying both spellings of the same field is never double-counted.
 BENCH_USAGE_JQ='
 def num($v): if ($v | type) == "number" then $v else 0 end;
-def tin($u):  num($u.input_tokens)  + num($u.cache_creation_input_tokens) + num($u.cache_read_input_tokens)
-            + num($u.inputTokens)   + num($u.cacheCreationInputTokens)    + num($u.cacheReadInputTokens);
-def tout($u): num($u.output_tokens) + num($u.outputTokens);
+def pick($snake; $camel): if ($snake | type) == "number" then $snake else num($camel) end;
+def tin($u):  pick($u.input_tokens;  $u.inputTokens)
+            + pick($u.cache_creation_input_tokens; $u.cacheCreationInputTokens)
+            + pick($u.cache_read_input_tokens;     $u.cacheReadInputTokens);
+def tout($u): pick($u.output_tokens; $u.outputTokens);
 (if (.usage | type) == "object" then {i: tin(.usage), o: tout(.usage)} else null end) as $top
 | (if (.modelUsage | type) == "object"
    then (.modelUsage | to_entries | map(.value))
@@ -187,10 +195,67 @@ def tout($u): num($u.output_tokens) + num($u.outputTokens);
     (if $u == null then "null" else ($u.o | tostring) end),
     (.total_cost_usd // null | tostring) ] | @tsv'
 
+# C15 - `bench --delta`: baseline = the first five rows of baseline.jsonl in file order, latest
+# = the last five. Five sums, one line, no claude call. A sum is `null` (delta `n/a`) when any
+# of its five rows carries `null` for that field - never silently treated as 0. Plain counts
+# (hits, refs, seconds) show a signed delta with "+0" when equal; percentages (tokens, cost) are
+# integer, relative to the baseline sum, truncated toward zero, and show "0%" (no sign) when
+# equal.
+DELTA_JQ='
+def hitcount($a): ($a | map(select(.hit == true)) | length);
+def sumor0($a; $f): ($a | map(.[$f] // 0) | add // 0);
+def anynull($a; $f): ($a | map(.[$f]) | any(. == null));
+def sumnullable($a; $f): if anynull($a; $f) then null else sumor0($a; $f) end;
+def trunc0: if . < 0 then (- ((-.) | floor)) else floor end;
+def signed(n): if n >= 0 then "+\(n)" else "\(n)" end;
+def numstr(v): if v == null then "null" else (v | tostring) end;
+def pctstr(b; l): if b == null or l == null then "n/a"
+  elif b == 0 then (if l == 0 then "0%" else "n/a" end)
+  else ( (( (l - b) * 100 / b ) | trunc0) as $p | (if $p == 0 then "0%" else (signed($p) + "%") end) ) end;
+.[0:5] as $base | .[-5:] as $latest |
+(hitcount($base)) as $hb | (hitcount($latest)) as $hl |
+(sumor0($base;"refs_matched")) as $rmb | (sumor0($latest;"refs_matched")) as $rml |
+(sumor0($base;"refs_expected")) as $reb | (sumor0($latest;"refs_expected")) as $rel |
+(sumor0($base;"seconds")) as $sb | (sumor0($latest;"seconds")) as $sl |
+(sumnullable($base;"tokens_in")) as $tib | (sumnullable($latest;"tokens_in")) as $til |
+(sumnullable($base;"tokens_out")) as $tob | (sumnullable($latest;"tokens_out")) as $tol |
+(sumnullable($base;"cost_usd")) as $cb | (sumnullable($latest;"cost_usd")) as $cl |
+"delta vs baseline · hits \($hb)/5 -> \($hl)/5 (\(signed($hl-$hb))) · refs \($rmb)/\($reb) -> \($rml)/\($rel) (\(signed($rml-$rmb))) · seconds \($sb) -> \($sl) (\(signed($sl-$sb))) · tokens_in \(numstr($tib)) -> \(numstr($til)) (\(pctstr($tib;$til))) · tokens_out \(numstr($tob)) -> \(numstr($tol)) (\(pctstr($tob;$tol))) · cost_usd \(numstr($cb)) -> \(numstr($cl)) (\(pctstr($cb;$cl)))"'
+
+cmd_bench_delta() {
+  if [ $# -gt 0 ]; then
+    echo "litopys bench --delta: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+  if ! command -v jq > /dev/null 2>&1; then
+    echo "litopys bench --delta: jq not found - delta parses baseline.jsonl with jq" >&2; return 2
+  fi
+
+  local root file n
+  root="$(project_root)"
+  file="$root/.litopys/baseline.jsonl"
+  if [ ! -f "$file" ]; then
+    echo "litopys bench --delta: no baseline at $file" >&2; return 2
+  fi
+  n="$(grep -c . "$file" 2>/dev/null || true)"
+  n="${n:-0}"
+  if [ "$n" -lt 10 ]; then
+    echo "litopys bench --delta: baseline.jsonl has $n row(s), need at least 10 (5 baseline + 5 latest)" >&2
+    return 2
+  fi
+
+  jq -r -s "$DELTA_JQ" "$file"
+  return 0
+}
+
 # `bench` is a manual/CLI mode: it must never read stdin, or a terminal run with an open pipe
 # would block forever (VULYK's handoff.py "manual modes must NOT read stdin" bug). Every
 # child process that could inherit the terminal gets </dev/null.
 cmd_bench() {
+  if [ "${1:-}" = "--delta" ]; then
+    shift
+    cmd_bench_delta "$@"
+    return $?
+  fi
   if [ $# -gt 0 ]; then
     echo "litopys bench: takes no arguments (got '$1')" >&2; usage; return 2
   fi
@@ -262,7 +327,7 @@ cmd_bench() {
   local hits=0 refs_hit=0 refs_exp=0 total=0
   local -a keys refs
   local out rc res started ended secs kp ref matched nkeys nrefs err meta ti to cost hit k row
-  local is_err failed
+  local is_err failed unparsable
   for i in 1 2 3 4 5; do
     IFS='|' read -r -a keys <<< "${qans[$i]}"
     IFS=';' read -r -a refs <<< "${qrefs[$i]}"
@@ -277,16 +342,23 @@ cmd_bench() {
     [ "$secs" -ge 0 ] || secs=0
     total=$((total + secs))
 
+    # Non-JSON stdout on an exit-0 call (a claude invocation that answered with plain text, no
+    # `--output-format json` envelope) is scored as a miss without pretending it parsed.
+    unparsable=0
+    if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | jq -e . > /dev/null 2>&1; then
+      unparsable=1
+    fi
+
     res="$(printf '%s' "$out" | jq -r '.result // ""' 2>/dev/null || true)"
     meta="$(printf '%s' "$out" | jq -r "$BENCH_USAGE_JQ" 2>/dev/null || true)"
     IFS=$'\t' read -r ti to cost <<< "$meta"
     ti="${ti:-null}"; to="${to:-null}"; cost="${cost:-null}"
 
-    # A call is failed if claude exited non-zero OR answered with "is_error":true - the latter
-    # is an error report in the result field, never an answer, and must not be scored as one.
+    # A call is failed if claude exited non-zero, answered with "is_error":true - an error
+    # report in the result field, never an answer - or its stdout could not be parsed at all.
     is_err="$(printf '%s' "$out" | jq -r 'if (.is_error == true) then 1 else 0 end' 2>/dev/null || true)"
     failed=0
-    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ]; then failed=1; fi
+    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ] || [ "$unparsable" -eq 1 ]; then failed=1; fi
 
     hit=false
     nkeys=0
@@ -322,7 +394,9 @@ cmd_bench() {
       '{ts:$ts,project:$project,q:$q,question:$question,hit:$hit,refs_expected:$refs_expected,refs_matched:$refs_matched,tokens_in:$tokens_in,tokens_out:$tokens_out,cost_usd:$cost_usd,seconds:$seconds,model:$model,litopys:$litopys}')"
 
     if [ "$failed" -eq 1 ]; then
-      if [ "$rc" -ne 0 ]; then
+      if [ "$unparsable" -eq 1 ]; then
+        err="unparsable stdout"
+      elif [ "$rc" -ne 0 ]; then
         err="$(head -n 1 "$errfile" 2>/dev/null || true)"
         [ -n "$err" ] || err="$(printf '%s' "$out" | head -n 1)"
         [ -n "$err" ] || err="claude exited $rc"

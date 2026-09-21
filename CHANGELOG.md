@@ -2,6 +2,25 @@
 
 All notable changes to litopys. Format: Keep a Changelog; versions follow semver.
 
+## [0.2.0] - 2026-09-21
+
+Phase 2 of the project-memory plugin (spec `litopys-phase-2-distill`).
+
+### Added
+- `bin/litopys distill record` - turns one raw journal plus a distilled body into a git-tracked `docs/chronicle/sessions/YYYY-MM-DD-<sid8>.md` record, appends one `session` chronicle line, and moves the journal to `.litopys/raw/done/`; writes one C14 cost row to `.litopys/distill.jsonl`.
+- `bin/litopys distill next` - takes the `distill.lock` mutex (stale after 30 minutes), moves bench/recall journals to `.litopys/raw/skipped/`, and prints up to `--max` (default 3) eligible closed journals oldest-first.
+- `bin/litopys distill finish` - commits only `docs/chronicle/` on the current branch (never the host's other staged or unstaged work) and releases the lock; always exits 0.
+- `/litopys:distill` skill forking a sonnet `distiller` agent that reads up to three closed journals and writes their bodies.
+- `PreCompact` hook marking compactions in the raw journal; the SessionStart banner's line 4 now reports pending journals to distill.
+- `bin/litopys bench --delta` (C15) - prints the last five rows of `.litopys/baseline.jsonl` against its first five (hits, refs, seconds, tokens, cost) with no model call; fewer than ten rows exits 2.
+- `--note`, `--ref` and every distilled record now pass through the host's `scripts/redact.sh` or the plugin's own copy - redaction no longer depends on the host alone.
+- `--ref` normalisation: multi-line refs collapse to one line and their ` · ` separators are neutralised so a ref can never forge a chronicle field.
+
+### Fixed
+- `bench`'s `BENCH_USAGE_JQ` comment now explains why `usage.input_tokens` alone read ~0 on every real round-1 row, and why the cache fields are summed instead.
+- `tokens_in`/`tokens_out` no longer double-count a `usage` object that carries both a snake_case and a camelCase spelling of the same field - snake_case wins per field, camelCase is the fallback only when snake_case is absent.
+- `bench` writes an `"error":"unparsable stdout"` row (scored as a miss, `tokens_in: null`) when `claude` exits 0 with stdout that is not JSON at all.
+
 ## [0.1.0] - 2026-09-21
 
 Phase 0-1 of the project-memory plugin (spec `litopys-phase-0-1`, council GREEN round 3).

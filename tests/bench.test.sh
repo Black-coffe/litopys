@@ -67,7 +67,7 @@ eq "row keeps the run ts"        "$NOW"   "$(field "$BL" Q1 .ts)"
 eq "row names the project"       "proj"   "$(field "$BL" Q1 .project)"
 eq "row carries the question"    "Which version shipped the alpha gate?" "$(field "$BL" Q1 .question)"
 eq "row names the model"         "sonnet" "$(field "$BL" Q1 .model)"
-eq "row carries the version"     "0.1.0"  "$(field "$BL" Q1 .litopys)"
+eq "row carries the version"     "0.2.0"  "$(field "$BL" Q1 .litopys)"
 eq "seconds is a number"         "number" "$(field "$BL" Q1 '.seconds|type')"
 
 # Q1: the keyphrase differs in case from the answer text, both refs present
@@ -82,6 +82,9 @@ if [ "$refute_uncached" = "12" ]; then bad "Q1 tokens_in is the uncached slice o
 eq "Q1 tokens_out from usage"    "678"    "$(field "$BL" Q1 .tokens_out)"
 eq "Q1 cost_usd"                 "0.0123" "$(field "$BL" Q1 .cost_usd)"
 eq "Q1 has no error key"         "null"   "$(field "$BL" Q1 '.error // "null"')"
+# Q1's usage object carries both spellings of every field (snake_case + a decoy camelCase) -
+# the snake_case values above (51616/678) must win outright, not be added to the decoys.
+eq "Q1 snake+camel same object counts once (no double count)" "51616" "$(field "$BL" Q1 .tokens_in)"
 
 # Q2: hit, one ref of two; top-level usage is all-zero so modelUsage is summed over both models
 eq "Q2 hit"                      "true"   "$(field "$BL" Q2 .hit)"
@@ -89,6 +92,9 @@ eq "Q2 refs_matched 1 of 2"      "1"      "$(field "$BL" Q2 .refs_matched)"
 eq "Q2 refs_expected"            "2"      "$(field "$BL" Q2 .refs_expected)"
 eq "Q2 tokens_in from modelUsage"  "2356" "$(field "$BL" Q2 .tokens_in)"
 eq "Q2 tokens_out from modelUsage" "120"  "$(field "$BL" Q2 .tokens_out)"
+# Explicit: top-level usage is present and all-zero, so the row falls back to modelUsage rather
+# than reading zeros (Ask 9).
+eq "Q2 all-zero top-level usage falls back to modelUsage" "2356" "$(field "$BL" Q2 .tokens_in)"
 
 # Q3: miss
 eq "Q3 miss"                     "false"  "$(field "$BL" Q3 .hit)"
@@ -166,6 +172,20 @@ fi
 exec 9>&-
 eq "the stdin run still wrote its rows" "5" "$(rows "$S/.litopys/baseline.jsonl")"
 
+# --- non-JSON stdout on an exit-0 call: scored as a miss, carries an error key (Ask 9) ------
+U="$T/unparsable-proj"
+mkdir -p "$U/docs/chronicle"
+cp "$QFIX" "$U/docs/chronicle/golden-questions.md"
+UBL="$U/.litopys/baseline.jsonl"
+uout="$(CLAUDE_PROJECT_DIR="$U" LITOPYS_STUB_UNPARSABLE=1 LITOPYS_NOW="$NOW" bash "$CLI" bench 2>/dev/null)"
+eq "unparsable stdout run still exits 0" "0"      "$?"
+eq "unparsable stdout run writes 5 rows" "5"      "$(rows "$UBL")"
+printf '%s' "$uout" | expect "unparsable stdout scores no hits" "hits 0/5 · refs 0/8 ·"
+eq "unparsable Q1 not a hit"            "false"  "$(field "$UBL" Q1 .hit)"
+eq "unparsable Q1 refs_matched 0"       "0"      "$(field "$UBL" Q1 .refs_matched)"
+eq "unparsable Q1 tokens_in null"       "null"   "$(field "$UBL" Q1 .tokens_in)"
+eq "unparsable Q1 carries the error key" "unparsable stdout" "$(field "$UBL" Q1 .error)"
+
 # --- malformed golden questions: one stderr line, exit 2, nothing written -------------------
 check_malformed() { # check_malformed <label> <file body>
   local label="$1" body="$2" M err
@@ -189,6 +209,46 @@ mkdir -p "$N"
 err="$(CLAUDE_PROJECT_DIR="$N" bash "$CLI" bench 2>&1 > /dev/null)"
 eq "missing golden questions exits 2" "2" "$?"
 printf '%s' "$err" | expect "missing file is named" "golden-questions.md"
+
+# --- bench --delta (C15): baseline vs latest, no model call ---------------------------------
+DFIX="$SRC/tests/fixtures/baseline-delta.jsonl"
+NOCLAUDE="$T/no-claude.sh"
+NOCLAUDE_LOG="$T/no-claude.log"
+printf '#!/usr/bin/env bash\necho called >> "%s"\nexit 99\n' "$NOCLAUDE_LOG" > "$NOCLAUDE"
+chmod +x "$NOCLAUDE"
+
+D="$T/delta-proj"
+mkdir -p "$D/.litopys"
+cp "$DFIX" "$D/.litopys/baseline.jsonl"
+dout="$(CLAUDE_PROJECT_DIR="$D" LITOPYS_CLAUDE="$NOCLAUDE" bash "$CLI" bench --delta 2>"$T/delta-err")"
+eq "delta (null variant) exits 0" "0" "$?"
+printf '%s' "$dout" | expect "delta null variant: hits" "hits 3/5 -> 4/5 (+1)"
+printf '%s' "$dout" | expect "delta null variant: refs" "refs 6/10 -> 8/10 (+2)"
+printf '%s' "$dout" | expect "delta null variant: seconds equal (+0)" "seconds 100 -> 100 (+0)"
+printf '%s' "$dout" | expect "delta null variant: tokens_in null -> n/a" "tokens_in 500000 -> null (n/a)"
+printf '%s' "$dout" | expect "delta null variant: tokens_out pct" "tokens_out 2500 -> 2000 (-20%)"
+printf '%s' "$dout" | expect "delta null variant: cost equal (0%)" "cost_usd 0.5 -> 0.5 (0%)"
+eq "delta prints exactly one line" "1" "$(printf '%s\n' "$dout" | grep -c .)"
+
+DN="$T/delta-proj-numeric"
+mkdir -p "$DN/.litopys"
+sed 's/"tokens_in":null/"tokens_in":110000/' "$DFIX" > "$DN/.litopys/baseline.jsonl"
+dnout="$(CLAUDE_PROJECT_DIR="$DN" LITOPYS_CLAUDE="$NOCLAUDE" bash "$CLI" bench --delta 2>/dev/null)"
+eq "delta (all-numeric variant) exits 0" "0" "$?"
+eq "delta (all-numeric variant) is exactly the C15 line" \
+  "delta vs baseline · hits 3/5 -> 4/5 (+1) · refs 6/10 -> 8/10 (+2) · seconds 100 -> 100 (+0) · tokens_in 500000 -> 550000 (+10%) · tokens_out 2500 -> 2000 (-20%) · cost_usd 0.5 -> 0.5 (0%)" \
+  "$dnout"
+
+D9="$T/delta-proj-9rows"
+mkdir -p "$D9/.litopys"
+head -n 9 "$DN/.litopys/baseline.jsonl" > "$D9/.litopys/baseline.jsonl"
+d9out="$(CLAUDE_PROJECT_DIR="$D9" LITOPYS_CLAUDE="$NOCLAUDE" bash "$CLI" bench --delta 2>"$T/delta9-err" > "$T/delta9-out")"
+eq "delta on 9 rows exits 2" "2" "$?"
+eq "delta on 9 rows prints no stdout" "0" "$(wc -c < "$T/delta9-out" | tr -d ' ')"
+eq "delta on 9 rows prints exactly one stderr line" "1" "$(grep -c . "$T/delta9-err")"
+
+if [ -e "$NOCLAUDE_LOG" ]; then bad "bench --delta called claude (LITOPYS_CLAUDE was invoked)"
+else echo "  ok    bench --delta never calls claude"; fi
 
 if [ -s "$FAILED" ]; then
   echo "bench.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"

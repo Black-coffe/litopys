@@ -1,0 +1,10 @@
+{"ts":"2026-09-14T10:00:00Z","project":"proj","q":"Q1","question":"q1","hit":true,"refs_expected":2,"refs_matched":2,"tokens_in":100000,"tokens_out":500,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.1.0"}
+{"ts":"2026-09-14T10:00:00Z","project":"proj","q":"Q2","question":"q2","hit":true,"refs_expected":2,"refs_matched":2,"tokens_in":100000,"tokens_out":500,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.1.0"}
+{"ts":"2026-09-14T10:00:00Z","project":"proj","q":"Q3","question":"q3","hit":true,"refs_expected":2,"refs_matched":1,"tokens_in":100000,"tokens_out":500,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.1.0"}
+{"ts":"2026-09-14T10:00:00Z","project":"proj","q":"Q4","question":"q4","hit":false,"refs_expected":2,"refs_matched":1,"tokens_in":100000,"tokens_out":500,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.1.0"}
+{"ts":"2026-09-14T10:00:00Z","project":"proj","q":"Q5","question":"q5","hit":false,"refs_expected":2,"refs_matched":0,"tokens_in":100000,"tokens_out":500,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.1.0"}
+{"ts":"2026-09-21T12:34:56Z","project":"proj","q":"Q1","question":"q1","hit":true,"refs_expected":2,"refs_matched":2,"tokens_in":110000,"tokens_out":400,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.2.0"}
+{"ts":"2026-09-21T12:34:56Z","project":"proj","q":"Q2","question":"q2","hit":true,"refs_expected":2,"refs_matched":2,"tokens_in":110000,"tokens_out":400,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.2.0"}
+{"ts":"2026-09-21T12:34:56Z","project":"proj","q":"Q3","question":"q3","hit":true,"refs_expected":2,"refs_matched":2,"tokens_in":null,"tokens_out":400,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.2.0"}
+{"ts":"2026-09-21T12:34:56Z","project":"proj","q":"Q4","question":"q4","hit":true,"refs_expected":2,"refs_matched":1,"tokens_in":110000,"tokens_out":400,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.2.0"}
+{"ts":"2026-09-21T12:34:56Z","project":"proj","q":"Q5","question":"q5","hit":false,"refs_expected":2,"refs_matched":1,"tokens_in":110000,"tokens_out":400,"cost_usd":0.1,"seconds":20,"model":"sonnet","litopys":"0.2.0"}

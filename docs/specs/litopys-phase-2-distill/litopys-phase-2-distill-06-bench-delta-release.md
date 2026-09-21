@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-06
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -56,5 +56,11 @@ blocked_by: [litopys-phase-2-distill-05]
 `bash tests/bench.test.sh`
 
 ## Implementation notes
+- `bin/litopys`: `VERSION="0.2.0"`; `cmd_bench_delta` (row-count gate, then one `jq -s` over `DELTA_JQ`) called as an early `--delta` branch inside `cmd_bench`; `BENCH_USAGE_JQ` reworked with `pick(snake; camel)` so a same-object snake+camel pair is never double-summed (comment rewritten to spell out the round-1-zero reason); the per-question loop gained an `unparsable` flag (`jq -e .` on stdout) folded into `failed`, writing `"error":"unparsable stdout"`.
+- `DELTA_JQ`: baseline = rows[0:5], latest = rows[-5:]; plain deltas (hits/refs/seconds) show a signed int with `+0` at zero; token/cost deltas are integer percentages truncated toward zero relative to baseline, `0%` at zero, `n/a` when either side's field-sum is `null` (any `null` in the 5 rows nulls that field's sum).
+- `tests/fixtures/baseline-delta.jsonl`: 10 rows, hand-picked so cost/percentage sums avoid float dust (`0.1*5` sums exactly `0.5` in IEEE754); one latest row (`Q3`) carries `tokens_in: null`; the all-numeric variant is generated in the test via `sed` (`null`->`110000`), not a second fixture file.
+- `tests/bench.test.sh`: added the double-count assertion (reusing the existing Q1 row, now with decoy camelCase duplicates in `claude-stub.sh`), an explicit modelUsage-fallback assertion (Q2, same fixture data), an `LITOPYS_STUB_UNPARSABLE=1` block, and the `--delta` block (null variant, generated numeric variant exact-line check, 9-row exit-2 check, a `LITOPYS_CLAUDE` pointed at a logging exit-99 script to prove `--delta` never invokes it).
+- Version literal bumps: `tests/append.test.sh:152`, `tests/hooks.test.sh:184` (`v0.1.0`->`v0.2.0`), `hooks/session-start.sh:37` (fallback default). `tests/append.test.sh:143` and `tests/hooks.test.sh:171`'s `v0.1.0` are chronicle-ref/fixture data, not the CLI version - left untouched per the story's non-goal.
+- `CHANGELOG.md` `[0.2.0]` covers the whole phase (all six stories), matching the AC's explicit item list, not just this story's own diff.
 
 ## Findings

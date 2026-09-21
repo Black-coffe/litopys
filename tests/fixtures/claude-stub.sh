@@ -11,6 +11,9 @@
 # LITOPYS_STUB_IS_ERROR=1 makes every call answer with `"is_error":true` and exit 0 - the
 # shape a failed API call takes when the CLI itself succeeded.
 #
+# LITOPYS_STUB_UNPARSABLE=1 makes every call print plain, non-JSON text and exit 0 - the shape
+# a broken `--output-format json` response takes when jq cannot parse it at all.
+#
 # Logs every invocation (cwd + argv, one line per field) to $LITOPYS_STUB_LOG when set,
 # which is how the test asserts the flags and cwd of the real call.
 set -u
@@ -20,6 +23,13 @@ for a in "$@"; do q="$a"; done
 
 if [ -n "${LITOPYS_STUB_LOG:-}" ]; then
   { printf 'call cwd=%s\n' "$PWD"; for a in "$@"; do printf 'arg %s\n' "$a"; done; } >> "$LITOPYS_STUB_LOG"
+fi
+
+if [ "${LITOPYS_STUB_UNPARSABLE:-0}" = "1" ]; then
+  # Exit 0 with stdout that is not JSON at all - jq must fail cleanly on this, not on a merely
+  # unexpected shape.
+  echo "this is not json"
+  exit 0
 fi
 
 if [ "${LITOPYS_STUB_IS_ERROR:-0}" = "1" ]; then
@@ -33,9 +43,11 @@ fi
 
 case "$q" in
   *alpha*)
-    # hit (case differs from the keyphrase) + both refs; cache-inclusive tokens_in = 51616
+    # hit (case differs from the keyphrase) + both refs; cache-inclusive tokens_in = 51616.
+    # Every field also carries its camelCase twin at a different value - snake_case wins per
+    # field, so the sum must stay 51616/678, never double-counted.
     cat <<'J'
-{"type":"result","is_error":false,"result":"**Answer:** The alpha gate shipped in V1.2.3.\n**Refs:**\n- docs/alpha.md - the gate\n- a1b2c3d - the commit\n**Confidence:** high","usage":{"input_tokens":12,"cache_creation_input_tokens":27542,"cache_read_input_tokens":24062,"output_tokens":678},"total_cost_usd":0.0123}
+{"type":"result","is_error":false,"result":"**Answer:** The alpha gate shipped in V1.2.3.\n**Refs:**\n- docs/alpha.md - the gate\n- a1b2c3d - the commit\n**Confidence:** high","usage":{"input_tokens":12,"cache_creation_input_tokens":27542,"cache_read_input_tokens":24062,"output_tokens":678,"inputTokens":999,"cacheCreationInputTokens":999,"cacheReadInputTokens":999,"outputTokens":999},"total_cost_usd":0.0123}
 J
     ;;
   *beta*)
