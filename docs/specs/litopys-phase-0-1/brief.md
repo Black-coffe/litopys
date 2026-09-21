@@ -45,4 +45,19 @@ Phase 0 (baseline) and phase 1 (raw journal) of Roadmap v2 in the grill brief. N
 
 ## Requirements
 
+The seven asks in quotable form (stories quote these; trace-check reads `> ` lines only):
+
+> Репо `litopys` = плагин Claude Code: `.claude-plugin/plugin.json` (name `litopys`), `skills/`, `agents/`, `hooks/hooks.json`, `bin/`; грузится через `claude --plugin-dir E:/Projects/litopys` в VULYK и в самом litopys.
+> `bin/litopys append --kind grill|brief|verdict|ship|handoff|note --ref <path> --note "<text>"` дописывает одну датированную строку в `docs/chronicle/YYYY-MM.md` проекта, в котором вызвана; идемпотентна по (ts, kind, ref); не требует модели.
+> Скилл `/litopys:recall <вопрос>` запускает сабагента (sonnet) в fork-контексте, который отвечает по `git log`, тегам, `CHANGELOG*`, `docs/specs/*/brief.md`, `docs/adr/`, `docs/grill/`, `docs/chronicle/`; в главный контекст возвращается только ответ со ссылками на файлы и коммиты.
+> `docs/chronicle/golden-questions.md` для VULYK: 5 вопросов с известным ответом и ссылкой (среди них «что было в релизе до 0.1, как брейнштормили, что устарело»), записанных до любой дистилляции; `bin/litopys bench` прогоняет их через recall и пишет `.litopys/baseline.jsonl` (вопрос, попадание да/нет, ссылки совпали, токены, секунды).
+> Хуки `Stop` и `UserPromptSubmit` пишут сырой журнал `.litopys/raw/<session_id>.md` (user_input, last_assistant_message, timestamp, cwd, git branch); `SessionEnd` только закрывает журнал флагом за ≤1 с; `SessionStart` подаёт ≤5 строк additionalContext (путь к хронике, число несведённых журналов, дата последней записи, имя скилла recall). `.litopys/` в gitignore, без ротации и без чистки.
+> Проверка на одной реальной сессии VULYK ≥100k токенов: сырой журнал сравнивается с `/export` той же сессии; отчёт `docs/specs/litopys-phase-0-1/recon/raw-vs-export.md` называет, что журнал теряет.
+> Ограничения: ничего не пишется в CLAUDE.md ни одного проекта; никаких вызовов `claude -p` или модели внутри хуков; sonnet только; `scripts/redact.sh` на любом пути в git; VULYK-хук learnings и librarian не трогаются (фаза 4).
+> 
+> ## Requirements
+> 
+> Grill brief: `docs/grill/2026-09-21-project-memory-chronicle.md` - Synthesis, Act 2, Roadmap v2. Claude Code facts verified 2026-09-21 (two sources each): hooks fields and timeouts (`docs/en/hooks`), plugin layout (`docs/en/plugins`), skills frontmatter incl. `context: fork` (`docs/en/skills`), transcripts and `/export` (`docs/en/sessions`).
+
+
 Grill brief: `docs/grill/2026-09-21-project-memory-chronicle.md` - Synthesis, Act 2, Roadmap v2. Claude Code facts verified 2026-09-21 (two sources each): hooks fields and timeouts (`docs/en/hooks`), plugin layout (`docs/en/plugins`), skills frontmatter incl. `context: fork` (`docs/en/skills`), transcripts and `/export` (`docs/en/sessions`).
