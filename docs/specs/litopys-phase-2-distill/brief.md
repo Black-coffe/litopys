@@ -51,6 +51,18 @@ Grill run by the Queen in ledger mode on the owner's standing authorisation ("Ow
 
 ## Asks
 
+1. `agents/distiller` sonnet; запись сессии = плоский файл с frontmatter (date, topics, links, source: live|backfill)
+2. redact; коммит мимо рабочих веток; lock + cap N очереди
+3. PreCompact-блок
+4. повторный замер золотых вопросов vs baseline; выход: delta vs baseline
+5. Redaction is conditional on the *host* project owning scripts/redact.sh ... the plugin is built to be dropped into any repo and ships no fallback filter of its own (e.g. $CLAUDE_PLUGIN_ROOT/scripts/redact.sh); `--ref` is never filtered at all.
+6. `bin/litopys append --ref` containing a newline or the ` · ` separator is not normalised, so a multi-line ref writes a two-line record and defeats (ts, kind, ref) idempotence.
+7. After `## closed`, a further prompt re-opens the same journal file and appends past the close marker ... the phase-2 consolidator will need a rule for journals with a close marker in the middle.
+8. phase 2's distiller skips `## user` blocks whose first line starts with `/litopys:recall`
+9. bench: comment wording on the round-1 zeros, snake_case+camelCase summed, no test for all-zero top-level `usage`, unparsable stdout scored as a miss without an `error` key
+10. никаких вызовов claude -p или модели внутри хуков; SessionEnd-хук укладывается в 1 секунду; ничего не пишется в CLAUDE.md ни одного проекта; только sonnet для агента recall; всё, что идёт в git, проходит scripts/redact.sh
+
+## Asks (verbatim quotes for trace-check)
 > 1. `agents/distiller` sonnet; запись сессии = плоский файл с frontmatter (date, topics, links, source: live|backfill)
 > 2. redact; коммит мимо рабочих веток; lock + cap N очереди
 > 3. PreCompact-блок

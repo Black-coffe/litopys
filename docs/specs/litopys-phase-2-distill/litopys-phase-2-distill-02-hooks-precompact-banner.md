@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-02
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: sonnet
@@ -50,5 +50,9 @@ A fifth hook event exists: `PreCompact` runs `raw-journal.sh compact`, which app
 `bash tests/hooks.test.sh`
 
 ## Implementation notes
+- `hooks/hooks.json`: added `PreCompact` -> `raw-journal.sh compact` with `timeout` 10; five event keys now.
+- `hooks/raw-journal.sh`: added `compact` to the mode allowlist and a separate `journal_compact()` (same `[ -f "$file" ] || return 0` guard, one `>>`, unaffected `journal_end()`); dispatch case reads `.compaction_trigger // .trigger // "-"` directly from the payload (not via `field()`, since `field` returns empty rather than chaining the second fallback key).
+- `hooks/session-start.sh`: line 4 is now `distill_line`, computed from the existing `raws` count (`count_md` already only globs `*.md` directly in the dir, so `done/`/`skipped/` subdirectories were never counted - no change needed there).
+- `tests/hooks.test.sh`: added `PreCompact` to the wiring loop + a `hooks.json has exactly five event keys` assertion; added compact-mode tests (marker with trigger, dash fallback, no-op with no journal); added a resume-after-close ordering assertion (C13); changed the banner journal fixture to 2 top-level files + 1 in `done/` and updated line-4 expectations to the new distill text; added `compact` to the fail-open mode loop.
 
 ## Findings

@@ -46,19 +46,22 @@ NOW="2026-09-21T12:34:56Z"
 # --- C7: the wiring ------------------------------------------------------------------------
 jq -e . "$WIRING" > /dev/null 2>&1
 eq "hooks.json is valid JSON" "0" "$?"
-for ev in UserPromptSubmit Stop SessionEnd SessionStart; do
+for ev in UserPromptSubmit Stop SessionEnd SessionStart PreCompact; do
   cmd="$(jq -r --arg e "$ev" '.hooks[$e][0].hooks[0].command // ""' "$WIRING")"
   printf '%s' "$cmd" | expect "$ev command uses CLAUDE_PLUGIN_ROOT" '${CLAUDE_PLUGIN_ROOT}/hooks/'
   eq "$ev hook is type command" "command" "$(jq -r --arg e "$ev" '.hooks[$e][0].hooks[0].type' "$WIRING")"
 done
+eq "hooks.json has exactly five event keys" "5" "$(jq -r '.hooks | keys | length' "$WIRING")"
 jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$WIRING" | expect "prompt mode wired" 'raw-journal.sh" prompt'
 jq -r '.hooks.Stop[0].hooks[0].command' "$WIRING" | expect "stop mode wired" 'raw-journal.sh" stop'
 jq -r '.hooks.SessionEnd[0].hooks[0].command' "$WIRING" | expect "end mode wired" 'raw-journal.sh" end'
 jq -r '.hooks.SessionStart[0].hooks[0].command' "$WIRING" | expect "banner wired" 'session-start.sh"'
+jq -r '.hooks.PreCompact[0].hooks[0].command' "$WIRING" | expect "compact mode wired" 'raw-journal.sh" compact'
 eq "SessionEnd declares no timeout" "false" "$(jq -r '.hooks.SessionEnd[0].hooks[0] | has("timeout")' "$WIRING")"
 eq "UserPromptSubmit timeout is 10" "10" "$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].timeout' "$WIRING")"
 eq "Stop timeout is 10" "10" "$(jq -r '.hooks.Stop[0].hooks[0].timeout' "$WIRING")"
 eq "SessionStart timeout is 10" "10" "$(jq -r '.hooks.SessionStart[0].hooks[0].timeout' "$WIRING")"
+eq "PreCompact timeout is 10" "10" "$(jq -r '.hooks.PreCompact[0].hooks[0].timeout' "$WIRING")"
 
 # --- C8: prompt creates the journal from the payload's cwd ---------------------------------
 P="$T/proj"
@@ -128,6 +131,32 @@ printf '{"session_id":"never-was","cwd":"%s","reason":"other"}' "$P" \
 eq "end without a journal exits 0" "0" "$?"
 no_file "end without a journal creates nothing" "$P/.litopys/raw/never-was.md"
 
+# --- C13: resume after close - a further prompt appends past '## closed' ---------------------
+printf '{"session_id":"s1","cwd":"%s","user_input":"resumed after close"}' "$P" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" prompt
+order="$(grep -n '^## closed · \|^## user · ' "$J" | tail -2)"
+first="$(printf '%s\n' "$order" | head -1)"
+second="$(printf '%s\n' "$order" | tail -1)"
+printf '%s' "$first" | expect "closed comes before the resumed user block" "## closed"
+printf '%s' "$second" | expect "a new user block follows the close" "## user"
+cat "$J" | expect "resumed prompt text lands in the journal" "resumed after close"
+
+# --- C7/C8/C13: PreCompact appends a compact marker with the trigger -------------------------
+printf '{"session_id":"s2","cwd":"%s","compaction_trigger":"auto"}' "$P" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" compact
+eq "compact exits 0" "0" "$?"
+J2="$P/.litopys/raw/s2.md"
+cat "$J2" | expect "compact marker with trigger" "## compact · $NOW · auto"
+
+printf '{"session_id":"s2","cwd":"%s"}' "$P" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" compact
+cat "$J2" | expect "compact with no trigger field falls back to a dash" "## compact · $NOW · -"
+
+printf '{"session_id":"compact-never-was","cwd":"%s","compaction_trigger":"manual"}' "$P" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" compact
+eq "compact without a journal exits 0" "0" "$?"
+no_file "compact without a journal creates nothing" "$P/.litopys/raw/compact-never-was.md"
+
 # --- no git repo -> branch is '-' --------------------------------------------------------------
 NG="$T/nogit"
 mkdir -p "$NG"
@@ -140,8 +169,9 @@ B="$T/banner"
 mkdir -p "$B/docs/chronicle"
 printf '# Chronicle 2026-08\n\n- 2026-08-03T10:00:00Z · note · a.md · older\n' > "$B/docs/chronicle/2026-08.md"
 printf '# Chronicle 2026-09\n\n- 2026-09-21T12:34:56Z · ship · v0.1.0 · newest\n' > "$B/docs/chronicle/2026-09.md"
-mkdir -p "$B/.litopys/raw"
-printf 'x\n' > "$B/.litopys/raw/a.md"; printf 'x\n' > "$B/.litopys/raw/b.md"; printf 'x\n' > "$B/.litopys/raw/c.md"
+mkdir -p "$B/.litopys/raw/done"
+printf 'x\n' > "$B/.litopys/raw/a.md"; printf 'x\n' > "$B/.litopys/raw/b.md"
+printf 'x\n' > "$B/.litopys/raw/done/c.md"
 
 out="$(printf '{"cwd":"%s","source":"startup"}' "$B" | bash "$START" 2>"$T/err2")"
 eq "session-start exits 0" "0" "$?"
@@ -151,10 +181,10 @@ eq "hookEventName" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOu
 ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
 eq "banner is exactly 5 lines" "5" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
 eq "every banner line is tagged" "0" "$(printf '%s\n' "$ctx" | grep -cv '^\[litopys\] ')"
-printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.1.0 · project chronicle"
+printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.2.0 · project chronicle"
 printf '%s\n' "$ctx" | expect "line 2: chronicle count" "[litopys] chronicle: docs/chronicle/ (2 files)"
 printf '%s\n' "$ctx" | expect "line 3: last entry date" "[litopys] last entry: 2026-09-21"
-printf '%s\n' "$ctx" | expect "line 4: raw journal count" "[litopys] raw journals: 3 unconsolidated in .litopys/raw/"
+printf '%s\n' "$ctx" | expect "line 4: distill pending count (top-level only)" "[litopys] distill: 2 pending · run /litopys:distill"
 printf '%s\n' "$ctx" | expect "line 5: recall" "[litopys] recall: /litopys:recall <question>"
 
 E="$T/empty-project"
@@ -162,11 +192,11 @@ mkdir -p "$E"
 ctx="$(printf '{"cwd":"%s"}' "$E" | bash "$START" | jq -r '.hookSpecificOutput.additionalContext')"
 printf '%s\n' "$ctx" | expect "no chronicle -> 0 files" "docs/chronicle/ (0 files)"
 printf '%s\n' "$ctx" | expect "no chronicle -> last entry none" "last entry: none"
-printf '%s\n' "$ctx" | expect "no journals -> 0 unconsolidated" "raw journals: 0 unconsolidated"
+printf '%s\n' "$ctx" | expect "no journals -> nothing pending" "[litopys] distill: nothing pending"
 no_file "the banner creates nothing" "$E/.litopys"
 
 # --- fail-open: malformed, empty, missing cwd, unwritable, no jq ------------------------------
-for mode in prompt stop end; do
+for mode in prompt stop end compact; do
   printf 'not json at all' | bash "$RAW" "$mode" > /dev/null 2>&1
   eq "$mode survives malformed stdin" "0" "$?"
   printf '' | bash "$RAW" "$mode" > /dev/null 2>&1

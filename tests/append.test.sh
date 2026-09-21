@@ -78,14 +78,48 @@ LITOPYS_NOW="2026-09-21T14:00:00Z" bash "$CLI" append --kind note --ref sec.md -
 cat "$CHRON" | refute "github token masked with redact.sh present" "$TOKEN"
 cat "$CHRON" | expect "masked record still written" "· note · sec.md · token "
 
-# --- project B: no scripts/redact.sh -> passthrough, no crash -----------------------------
+# --- C3 amended: --kind session, --ref normalised and redacted ----------------------------
+LITOPYS_NOW="2026-09-21T15:00:00Z" bash "$CLI" append --kind session \
+  --ref docs/chronicle/sessions/s.md --note "a session record" > /dev/null 2>&1
+eq "--kind session is accepted" "0" "$?"
+cat "$CHRON" | expect "session line on disk" "· session · docs/chronicle/sessions/s.md · a session record"
+
+# A ref carrying a newline and the C3 separator writes one line, not two records.
+LITOPYS_NOW="2026-09-21T15:01:00Z" bash "$CLI" append --kind note --ref $'a\nb · c' --note n > /dev/null 2>&1
+eq "multi-line ref is one record" "7" "$(lines "$CHRON")"
+cat "$CHRON" | expect "ref collapsed, ' · ' neutralised" "- 2026-09-21T15:01:00Z · note · a b - c · n"
+
+KEY="AKIAABCDEFGHIJKLMNOP"
+LITOPYS_NOW="2026-09-21T15:02:00Z" bash "$CLI" append --kind note --ref "$KEY" --note "key in the ref" > /dev/null 2>&1
+cat "$CHRON" | refute "an AWS key in --ref is masked" "$KEY"
+cat "$CHRON" | expect "the masked ref still writes a record" "· note · [VULYK:REDACTED] · key in the ref"
+
+err="$(LITOPYS_NOW="2026-09-21T15:03:00Z" bash "$CLI" append --kind note --ref $' \n\t ' --note n 2>&1 >/dev/null)"
+eq "a ref that normalises to nothing exits 2" "2" "$?"
+printf '%s' "$err" | expect "empty ref is named" "--ref is empty after normalisation"
+
+# --- project B: no host scripts/redact.sh -> the plugin's own copy masks (C16) -------------
 B="$T/proj-b"
 mkdir -p "$B"
 export CLAUDE_PROJECT_DIR="$B"
+export CLAUDE_PLUGIN_ROOT="$SRC"
 out="$(LITOPYS_NOW="2026-09-21T14:00:00Z" bash "$CLI" append --kind note --ref sec.md --note "token $TOKEN here" 2>&1)"
-eq "passthrough append exits 0" "0" "$?"
-printf '%s' "$out" | expect "no redact.sh -> note passes through" "$TOKEN"
+eq "plugin-fallback append exits 0" "0" "$?"
+printf '%s' "$out" | refute "no host redact.sh -> the plugin's copy masks" "$TOKEN"
 eq "project B wrote its own chronicle" "1" "$(lines "$B/docs/chronicle/$MONTH.md")"
+
+# --- neither host nor plugin copy reachable -> passthrough, no crash ----------------------
+NOLIB="$T/nolib/bin"
+mkdir -p "$NOLIB"
+cp "$CLI" "$NOLIB/litopys"
+B2="$T/proj-b2"
+mkdir -p "$B2"
+export CLAUDE_PROJECT_DIR="$B2"
+unset CLAUDE_PLUGIN_ROOT
+out="$(LITOPYS_NOW="2026-09-21T14:00:00Z" bash "$NOLIB/litopys" append --kind note --ref sec.md --note "token $TOKEN here" 2>&1)"
+eq "no redactor anywhere -> exits 0" "0" "$?"
+printf '%s' "$out" | expect "no redactor anywhere -> note passes through" "$TOKEN"
+eq "project B2 wrote its own chronicle" "1" "$(lines "$B2/docs/chronicle/$MONTH.md")"
 
 # --- argument errors: exit 2, usage on stderr, nothing written ----------------------------
 C="$T/proj-c"
@@ -115,7 +149,7 @@ else echo "  ok    nothing written under the cwd"; fi
 # --- plumbing ------------------------------------------------------------------------------
 ver="$(bash "$CLI" --version 2>&1)"
 eq "--version exits 0" "0" "$?"
-printf '%s' "$ver" | expect "--version prints 0.1.0" "0.1.0"
+printf '%s' "$ver" | expect "--version prints 0.2.0" "0.2.0"
 cat "$SRC/.gitignore" | expect ".gitignore ignores .litopys/" ".litopys/"
 
 if [ -s "$FAILED" ]; then

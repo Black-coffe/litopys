@@ -2,6 +2,8 @@
 # litopys CLI - deterministic chronicle writer, no model, no tokens.
 #
 #   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
+#          bash bin/litopys distill record --journal <raw.md> --body <body.md|->
+#          bash bin/litopys distill next | distill finish
 #          bash bin/litopys bench
 #          bash bin/litopys --version | help
 #
@@ -13,17 +15,33 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.1.0"
-KINDS="grill brief verdict ship handoff note"
+VERSION="0.2.0"
+KINDS="grill brief verdict ship handoff note session"
 
 usage() {
   cat >&2 <<EOF
 litopys $VERSION
   litopys append --kind <$(echo "$KINDS" | tr ' ' '|')> --ref <path|sha> [--note "<text>"]
       Append one dated line to <root>/docs/chronicle/YYYY-MM.md. Idempotent on (ts, kind, ref).
+  litopys distill record --journal <raw.md> --body <body.md|-> [--topics a,b] [--links x,y]
+                         [--source live|backfill] [--model <m>] [--force]
+      Turn one raw journal plus one distilled body into docs/chronicle/sessions/<date>-<sid8>.md,
+      append one session line to the monthly chronicle, move the journal to .litopys/raw/done/.
+  litopys distill next [--max N]
+      Take the distill.lock mutex (stale after 30 minutes), park eligible bench, user-less and
+      already-distilled journals in .litopys/raw/skipped/, print up to N (default 3) eligible
+      journal paths oldest first. A journal whose session may still be running is never moved.
+  litopys distill finish
+      Commit only the paths this run wrote (.litopys/distill.paths) on the current branch,
+      never the host's other staged or unstaged work, and release the distill lock.
+      Prints `committed <sha7>` or
+      `uncommitted: <reason>`; always exit 0.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
+  litopys bench --delta
+      Print the last five rows of <root>/.litopys/baseline.jsonl against its first five
+      (hits, refs, seconds, tokens, cost) - no model call. Fewer than ten rows exits 2.
   litopys --version       Print $VERSION.
   litopys help            This text.
 
@@ -45,6 +63,25 @@ project_root() {
     return 0
   fi
   printf '%s\n' "$PWD"
+}
+
+# C16 - which secret filter runs. The host project's own scripts/redact.sh wins (its patterns
+# are the ones its owner maintains), then the plugin's shipped copy, then the copy next to this
+# script when CLAUDE_PLUGIN_ROOT is unset. None of the three present -> `cat`: redaction is
+# best-effort and never a gate, exactly as it was when only the host copy counted.
+redactor() { # redactor [root] - print a filter path, or the literal `cat`
+  local root="${1:-$(project_root)}" here
+  if [ -f "$root/scripts/redact.sh" ]; then printf '%s\n' "$root/scripts/redact.sh"; return 0; fi
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh" ]; then
+    printf '%s\n' "${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh"; return 0
+  fi
+  here="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)"
+  if [ -n "$here" ] && [ -f "$here/scripts/redact.sh" ]; then printf '%s\n' "$here/scripts/redact.sh"; return 0; fi
+  printf '%s\n' "cat"
+}
+
+redact_filter() { # redact_filter <redactor-path> - stdin -> stdout, `cat` when there is none
+  if [ "$1" = "cat" ]; then cat; else bash "$1"; fi
 }
 
 cmd_append() {
@@ -82,13 +119,27 @@ cmd_append() {
   ts="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   month="$(printf '%s' "$ts" | cut -c1-7)"
 
-  # Secrets never reach a committed chronicle line; redact.sh is a passthrough filter that
-  # always exits 0, so its absence costs the note nothing (C3).
-  if [ -n "$note" ] && [ -f "$root/scripts/redact.sh" ]; then
-    note="$(printf '%s\n' "$note" | bash "$root/scripts/redact.sh" 2>/dev/null || printf '%s' "$note")"
+  # Secrets never reach a committed chronicle line. Both fields go through the same C16 filter
+  # (host copy first, plugin copy second) - its absence is impossible to rely on, and a failure
+  # of the filter falls back to the unfiltered text rather than dropping the record (C3).
+  local filter
+  filter="$(redactor "$root")"
+  if [ -n "$note" ]; then
+    note="$(printf '%s\n' "$note" | redact_filter "$filter" 2>/dev/null || printf '%s' "$note")"
   fi
   # One record = one line: newlines, carriage returns and tabs collapse to spaces.
   note="$(printf '%s' "$note" | tr '\n\r\t' '   ')"
+
+  # C3 amended: --ref is normalised to one line, its ' · ' separators neutralised so a ref can
+  # never forge a second field, and then redacted like --note. A ref that is empty afterwards
+  # would write a record nothing can be keyed on.
+  ref="$(printf '%s' "$ref" | tr '\n\r\t' '   ')"
+  ref="${ref// · / - }"
+  ref="$(printf '%s\n' "$ref" | redact_filter "$filter" 2>/dev/null || printf '%s' "$ref")"
+  ref="$(trim "$ref")"
+  if [ -z "$ref" ]; then
+    echo "litopys append: --ref is empty after normalisation" >&2; usage; return 2
+  fi
 
   file="$root/docs/chronicle/$month.md"
   if [ ! -f "$file" ]; then
@@ -116,18 +167,23 @@ trim() { # trim <string> - strip leading and trailing whitespace
   printf '%s' "$s"
 }
 
-# C5 token extraction. `claude -p --output-format json` reports the input side in three fields
-# and a forked skill's *uncached* `input_tokens` is a couple of tokens while cache creation and
-# cache read carry the actual spend (live probe: input 2, cache_creation 50520, cache_read 0,
-# output 4) - reading the uncached slice alone made every real baseline row read 0 (round-1
-# seat, Ask 4). So `tokens_in` is the sum of all three. `modelUsage` is the same information
-# per model in camelCase; it is the fallback when a top-level `usage` object exists but is
-# all-zero. `null` is written only when neither object is present at all.
+# C5 token extraction. `claude -p --output-format json` reports the input side in three fields:
+# `usage.input_tokens` alone is the *uncached* slice - a couple of tokens per call - while cache
+# creation and cache read carry the actual spend (live probe: input 2, cache_creation 50520,
+# cache_read 0, output 4). Reading `input_tokens` alone read ~0 on every real row in round 1
+# (Ask 4), so `tokens_in` sums all three input fields instead. `modelUsage` is the same
+# information per model in camelCase; it is the fallback when a top-level `usage` object exists
+# but is all-zero. `null` is written only when neither object is present at all. Within one
+# object, snake_case and camelCase are never both summed - each field prefers its snake_case
+# value when present, falling back to camelCase only when the snake field is absent, so a
+# payload carrying both spellings of the same field is never double-counted.
 BENCH_USAGE_JQ='
 def num($v): if ($v | type) == "number" then $v else 0 end;
-def tin($u):  num($u.input_tokens)  + num($u.cache_creation_input_tokens) + num($u.cache_read_input_tokens)
-            + num($u.inputTokens)   + num($u.cacheCreationInputTokens)    + num($u.cacheReadInputTokens);
-def tout($u): num($u.output_tokens) + num($u.outputTokens);
+def pick($snake; $camel): if ($snake | type) == "number" then $snake else num($camel) end;
+def tin($u):  pick($u.input_tokens;  $u.inputTokens)
+            + pick($u.cache_creation_input_tokens; $u.cacheCreationInputTokens)
+            + pick($u.cache_read_input_tokens;     $u.cacheReadInputTokens);
+def tout($u): pick($u.output_tokens; $u.outputTokens);
 (if (.usage | type) == "object" then {i: tin(.usage), o: tout(.usage)} else null end) as $top
 | (if (.modelUsage | type) == "object"
    then (.modelUsage | to_entries | map(.value))
@@ -141,10 +197,67 @@ def tout($u): num($u.output_tokens) + num($u.outputTokens);
     (if $u == null then "null" else ($u.o | tostring) end),
     (.total_cost_usd // null | tostring) ] | @tsv'
 
+# C15 - `bench --delta`: baseline = the first five rows of baseline.jsonl in file order, latest
+# = the last five. Five sums, one line, no claude call. A sum is `null` (delta `n/a`) when any
+# of its five rows carries `null` for that field - never silently treated as 0. Plain counts
+# (hits, refs, seconds) show a signed delta with "+0" when equal; percentages (tokens, cost) are
+# integer, relative to the baseline sum, truncated toward zero, and show "0%" (no sign) when
+# equal.
+DELTA_JQ='
+def hitcount($a): ($a | map(select(.hit == true)) | length);
+def sumor0($a; $f): ($a | map(.[$f] // 0) | add // 0);
+def anynull($a; $f): ($a | map(.[$f]) | any(. == null));
+def sumnullable($a; $f): if anynull($a; $f) then null else sumor0($a; $f) end;
+def trunc0: if . < 0 then (- ((-.) | floor)) else floor end;
+def signed(n): if n >= 0 then "+\(n)" else "\(n)" end;
+def numstr(v): if v == null then "null" else (v | tostring) end;
+def pctstr(b; l): if b == null or l == null then "n/a"
+  elif b == 0 then (if l == 0 then "0%" else "n/a" end)
+  else ( (( (l - b) * 100 / b ) | trunc0) as $p | (if $p == 0 then "0%" else (signed($p) + "%") end) ) end;
+.[0:5] as $base | .[-5:] as $latest |
+(hitcount($base)) as $hb | (hitcount($latest)) as $hl |
+(sumor0($base;"refs_matched")) as $rmb | (sumor0($latest;"refs_matched")) as $rml |
+(sumor0($base;"refs_expected")) as $reb | (sumor0($latest;"refs_expected")) as $rel |
+(sumor0($base;"seconds")) as $sb | (sumor0($latest;"seconds")) as $sl |
+(sumnullable($base;"tokens_in")) as $tib | (sumnullable($latest;"tokens_in")) as $til |
+(sumnullable($base;"tokens_out")) as $tob | (sumnullable($latest;"tokens_out")) as $tol |
+(sumnullable($base;"cost_usd")) as $cb | (sumnullable($latest;"cost_usd")) as $cl |
+"delta vs baseline · hits \($hb)/5 -> \($hl)/5 (\(signed($hl-$hb))) · refs \($rmb)/\($reb) -> \($rml)/\($rel) (\(signed($rml-$rmb))) · seconds \($sb) -> \($sl) (\(signed($sl-$sb))) · tokens_in \(numstr($tib)) -> \(numstr($til)) (\(pctstr($tib;$til))) · tokens_out \(numstr($tob)) -> \(numstr($tol)) (\(pctstr($tob;$tol))) · cost_usd \(numstr($cb)) -> \(numstr($cl)) (\(pctstr($cb;$cl)))"'
+
+cmd_bench_delta() {
+  if [ $# -gt 0 ]; then
+    echo "litopys bench --delta: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+  if ! command -v jq > /dev/null 2>&1; then
+    echo "litopys bench --delta: jq not found - delta parses baseline.jsonl with jq" >&2; return 2
+  fi
+
+  local root file n
+  root="$(project_root)"
+  file="$root/.litopys/baseline.jsonl"
+  if [ ! -f "$file" ]; then
+    echo "litopys bench --delta: no baseline at $file" >&2; return 2
+  fi
+  n="$(grep -c . "$file" 2>/dev/null || true)"
+  n="${n:-0}"
+  if [ "$n" -lt 10 ]; then
+    echo "litopys bench --delta: baseline.jsonl has $n row(s), need at least 10 (5 baseline + 5 latest)" >&2
+    return 2
+  fi
+
+  jq -r -s "$DELTA_JQ" "$file"
+  return 0
+}
+
 # `bench` is a manual/CLI mode: it must never read stdin, or a terminal run with an open pipe
 # would block forever (VULYK's handoff.py "manual modes must NOT read stdin" bug). Every
 # child process that could inherit the terminal gets </dev/null.
 cmd_bench() {
+  if [ "${1:-}" = "--delta" ]; then
+    shift
+    cmd_bench_delta "$@"
+    return $?
+  fi
   if [ $# -gt 0 ]; then
     echo "litopys bench: takes no arguments (got '$1')" >&2; usage; return 2
   fi
@@ -216,7 +329,7 @@ cmd_bench() {
   local hits=0 refs_hit=0 refs_exp=0 total=0
   local -a keys refs
   local out rc res started ended secs kp ref matched nkeys nrefs err meta ti to cost hit k row
-  local is_err failed
+  local is_err failed unparsable
   for i in 1 2 3 4 5; do
     IFS='|' read -r -a keys <<< "${qans[$i]}"
     IFS=';' read -r -a refs <<< "${qrefs[$i]}"
@@ -231,16 +344,23 @@ cmd_bench() {
     [ "$secs" -ge 0 ] || secs=0
     total=$((total + secs))
 
+    # Non-JSON stdout on an exit-0 call (a claude invocation that answered with plain text, no
+    # `--output-format json` envelope) is scored as a miss without pretending it parsed.
+    unparsable=0
+    if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | jq -e . > /dev/null 2>&1; then
+      unparsable=1
+    fi
+
     res="$(printf '%s' "$out" | jq -r '.result // ""' 2>/dev/null || true)"
     meta="$(printf '%s' "$out" | jq -r "$BENCH_USAGE_JQ" 2>/dev/null || true)"
     IFS=$'\t' read -r ti to cost <<< "$meta"
     ti="${ti:-null}"; to="${to:-null}"; cost="${cost:-null}"
 
-    # A call is failed if claude exited non-zero OR answered with "is_error":true - the latter
-    # is an error report in the result field, never an answer, and must not be scored as one.
+    # A call is failed if claude exited non-zero, answered with "is_error":true - an error
+    # report in the result field, never an answer - or its stdout could not be parsed at all.
     is_err="$(printf '%s' "$out" | jq -r 'if (.is_error == true) then 1 else 0 end' 2>/dev/null || true)"
     failed=0
-    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ]; then failed=1; fi
+    if [ "$rc" -ne 0 ] || [ "${is_err:-0}" = "1" ] || [ "$unparsable" -eq 1 ]; then failed=1; fi
 
     hit=false
     nkeys=0
@@ -276,7 +396,9 @@ cmd_bench() {
       '{ts:$ts,project:$project,q:$q,question:$question,hit:$hit,refs_expected:$refs_expected,refs_matched:$refs_matched,tokens_in:$tokens_in,tokens_out:$tokens_out,cost_usd:$cost_usd,seconds:$seconds,model:$model,litopys:$litopys}')"
 
     if [ "$failed" -eq 1 ]; then
-      if [ "$rc" -ne 0 ]; then
+      if [ "$unparsable" -eq 1 ]; then
+        err="unparsable stdout"
+      elif [ "$rc" -ne 0 ]; then
         err="$(head -n 1 "$errfile" 2>/dev/null || true)"
         [ -n "$err" ] || err="$(printf '%s' "$out" | head -n 1)"
         [ -n "$err" ] || err="claude exited $rc"
@@ -294,11 +416,525 @@ cmd_bench() {
   return 0
 }
 
+# --- distill (C11-C14) ---------------------------------------------------------------------
+# `distill record` is the model-free half of distillation: the forked distiller agent reads a
+# raw journal and writes a body; this turns the pair into the git-tracked session record. It
+# validates everything it can before it writes anything - a rejected body must leave the
+# journal exactly where it was, still distillable.
+
+csv_list() { # csv_list "a, b" -> "[a, b]"   (empty -> "[]")
+  local raw="$1" out="" item
+  local -a parts=()
+  IFS=',' read -r -a parts <<< "$raw"
+  for item in ${parts[@]+"${parts[@]}"}; do
+    item="$(trim "$item")"
+    [ -n "$item" ] || continue
+    if [ -z "$out" ]; then out="$item"; else out="$out, $item"; fi
+  done
+  printf '[%s]' "$out"
+}
+
+json_str() { # json_str <text> - minimal JSON string escaping (no jq dependency here)
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+bytes() { # bytes <file> - size in bytes, digits only
+  wc -c < "$1" 2>/dev/null | tr -dc '0-9'
+}
+
+distill_record() {
+  local journal="" bodyarg="" topics="" links="" source="live" model="sonnet" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --journal|--body|--topics|--links|--source|--model)
+        if [ $# -lt 2 ]; then
+          echo "litopys distill record: $1 needs a value" >&2; usage; return 2
+        fi
+        case "$1" in
+          --journal) journal="$2" ;;
+          --body)    bodyarg="$2" ;;
+          --topics)  topics="$2" ;;
+          --links)   links="$2" ;;
+          --source)  source="$2" ;;
+          --model)   model="$2" ;;
+        esac
+        shift 2
+        ;;
+      --force) force=1; shift ;;
+      *) echo "litopys distill record: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+
+  if [ -z "$journal" ]; then
+    echo "litopys distill record: --journal is required" >&2; usage; return 2
+  fi
+  if [ ! -f "$journal" ]; then
+    echo "litopys distill record: no journal at $journal" >&2; return 2
+  fi
+  if [ -z "$bodyarg" ]; then
+    echo "litopys distill record: --body is required" >&2; usage; return 2
+  fi
+  if [ "$bodyarg" != "-" ] && [ ! -f "$bodyarg" ]; then
+    echo "litopys distill record: no body at $bodyarg" >&2; return 2
+  fi
+  case "$source" in
+    live|backfill) : ;;
+    *) echo "litopys distill record: --source must be live or backfill (got '$source')" >&2; return 2 ;;
+  esac
+  [ -n "$model" ] || model="sonnet"
+
+  # --- journal: frontmatter + C13 block scan -----------------------------------------------
+  local sid="" started="" branch="" line key val fm=0 last_header="" ended="-"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
+    if [ "$fm" -eq 1 ]; then
+      if [ "$line" = "---" ]; then fm=2; continue; fi
+      key="${line%%:*}"; val="$(trim "${line#*:}")"
+      case "$key" in
+        session_id) sid="$val" ;;
+        started)    started="$val" ;;
+        branch)     branch="$val" ;;
+      esac
+      continue
+    fi
+    case "$line" in '## '*) last_header="$line" ;; esac
+  done < "$journal"
+
+  if [ -z "$sid" ]; then
+    echo "litopys distill record: $journal has no session_id in its frontmatter" >&2; return 2
+  fi
+  # C13: one journal = one record whatever the number of closed/compact markers. `ended` is the
+  # last `## closed` only when it is also the file's last block - anything after it is a resume.
+  case "$last_header" in
+    '## closed'*)
+      ended="$(trim "${last_header#'## closed'}")"
+      ended="$(trim "${ended#·}")"
+      ended="$(trim "${ended%%·*}")"
+      ;;
+  esac
+  [ -n "$ended" ] || ended="-"
+  [ -n "$branch" ] || branch="-"
+
+  # --- body: one title, the four C11 sections, in order ------------------------------------
+  local body title="" first=1
+  local -a secs=()
+  if [ "$bodyarg" = "-" ]; then body="$(cat)"; else body="$(cat "$bodyarg")"; fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$first" -eq 1 ]; then
+      [ -n "$(trim "$line")" ] || continue
+      case "$line" in
+        '# '*) title="$(trim "${line#\# }")"; first=0; continue ;;
+        *) echo "litopys distill record: body must start with a '# <title>' line" >&2; return 2 ;;
+      esac
+    fi
+    case "$line" in '## '*) secs+=("$(trim "${line#\#\# }")") ;; esac
+  done <<< "$body"
+
+  if [ "$first" -eq 1 ] || [ -z "$title" ]; then
+    echo "litopys distill record: body is empty or has no '# <title>' line" >&2; return 2
+  fi
+  if [ "${secs[*]:-}" != "Decisions Problems Brainstorm Links" ]; then
+    echo "litopys distill record: body needs exactly '## Decisions', '## Problems', '## Brainstorm', '## Links' in that order (got: ${secs[*]:-none})" >&2
+    return 2
+  fi
+
+  # --- paths -------------------------------------------------------------------------------
+  local root now rdate sid8 sidsafe rel file
+  root="$(project_root)"
+  now="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  if [ -n "$started" ]; then
+    rdate="$(printf '%s' "$started" | cut -c1-10)"
+  else
+    rdate="$(printf '%s' "$now" | cut -c1-10)"; started="-"
+  fi
+  sid8="$(printf '%s' "$sid" | cut -c1-8)"
+  sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
+  rel="docs/chronicle/sessions/$rdate-$sid8.md"
+  file="$root/$rel"
+
+  if [ -f "$file" ] && [ "$force" -ne 1 ]; then
+    echo "litopys distill record: record exists: $rel (use --force)" >&2; return 2
+  fi
+
+  # --- assemble, redact, write (C11/C16) ---------------------------------------------------
+  local jbytes bbytes tokens filter record tmp
+  jbytes="$(bytes "$journal")"; jbytes="${jbytes:-0}"
+  bbytes="$(printf '%s\n' "$body" | wc -c | tr -dc '0-9')"; bbytes="${bbytes:-0}"
+  tokens=$(( (jbytes + bbytes) / 4 ))
+
+  record="$(cat <<RECORD
+---
+litopys: session
+version: 1
+date: $rdate
+session_id: $sid
+started: $started
+ended: $ended
+branch: $branch
+topics: $(csv_list "$topics")
+links: $(csv_list "$links")
+source: $source
+tokens: $tokens
+model: $model
+---
+$body
+RECORD
+)"
+
+  if ! mkdir -p "$root/docs/chronicle/sessions"; then
+    echo "litopys distill record: cannot create $root/docs/chronicle/sessions" >&2; return 2
+  fi
+  filter="$(redactor "$root")"
+  tmp="$file.tmp.$$"
+  if printf '%s\n' "$record" | redact_filter "$filter" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    printf '%s\n' "$record" > "$file"
+  fi
+
+  # --- one chronicle line, through cmd_append's own path (one writer for the monthly file) --
+  cmd_append --kind session --ref "$rel" --note "$title" > /dev/null || true
+
+  # --- the run manifest: exactly the paths this run wrote, repo-relative, one per line ------
+  # `distill finish` commits these and nothing else (review round 1, major 3). Appended only
+  # after a successful write - a refused `record` (exit 2) has returned long before here.
+  if mkdir -p "$root/.litopys" 2>/dev/null; then
+    printf '%s\ndocs/chronicle/%s.md\n' "$rel" "$(printf '%s' "$now" | cut -c1-7)" \
+      >> "$root/.litopys/distill.paths"
+  fi
+
+  # --- the journal leaves the queue (C12: done/ only) --------------------------------------
+  if mkdir -p "$root/.litopys/raw/done"; then
+    [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
+    mv -f "$journal" "$root/.litopys/raw/done/$sidsafe.md" 2>/dev/null || true
+  fi
+
+  # --- one C14 cost row --------------------------------------------------------------------
+  if mkdir -p "$root/.litopys"; then
+    printf '{"ts":"%s","session_id":"%s","record":"%s","journal_bytes":%s,"body_bytes":%s,"tokens_est":%s,"model":"%s","source":"%s","litopys":"%s"}\n' \
+      "$(json_str "$now")" "$(json_str "$sid")" "$(json_str "$rel")" "$jbytes" "$bbytes" "$tokens" \
+      "$(json_str "$model")" "$(json_str "$source")" "$(json_str "$VERSION")" \
+      >> "$root/.litopys/distill.jsonl"
+  fi
+
+  printf '%s\n' "$rel"
+  return 0
+}
+
+# --- distill next (C12) ---------------------------------------------------------------------
+# The lock's mutex, the skip rule and the eligibility/cap logic. No git, no commit; the lock is
+# released here only when nothing was selected - `distill finish` (story 05) releases it
+# otherwise.
+
+journal_scan() { # journal_scan <file> - prints "started<US>firstuser<US>lastheader<US>sid" (US =
+                  # \x1f, not tab: bash `read` collapses consecutive IFS-whitespace delimiters,
+                  # which would silently swallow an empty field - journals with no `## user`
+                  # block need that middle field to stay empty and stay a field.
+  local file="$1" fm=0 line key val started="" firstuser="" lastheader="" sid="" inuser=0 seen=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
+    if [ "$fm" -eq 1 ]; then
+      if [ "$line" = "---" ]; then fm=2; continue; fi
+      key="${line%%:*}"; val="$(trim "${line#*:}")"
+      case "$key" in
+        started)    started="$val" ;;
+        session_id) sid="$val" ;;
+      esac
+      continue
+    fi
+    case "$line" in
+      '## '*)
+        lastheader="$line"
+        if [ "$seen" -eq 0 ]; then
+          case "$line" in '## user'*) inuser=1 ;; *) inuser=0 ;; esac
+        else
+          inuser=0
+        fi
+        continue
+        ;;
+    esac
+    if [ "$inuser" -eq 1 ] && [ "$seen" -eq 0 ] && [ -n "$(trim "$line")" ]; then
+      firstuser="$line"
+      seen=1
+      inuser=0
+    fi
+  done < "$file"
+  printf '%s\x1f%s\x1f%s\x1f%s\n' "$started" "$firstuser" "$lastheader" "$sid"
+}
+
+distill_next() {
+  local max=3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --max)
+        if [ $# -lt 2 ]; then
+          echo "litopys distill next: --max needs a value" >&2; usage; return 2
+        fi
+        max="$2"; shift 2 ;;
+      *) echo "litopys distill next: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+  case "$max" in
+    ''|*[!0-9]*|0) echo "litopys distill next: --max must be a positive integer (got '$max')" >&2; usage; return 2 ;;
+  esac
+
+  local root raw lock
+  root="$(project_root)"
+  raw="$root/.litopys/raw"
+  lock="$root/.litopys/distill.lock"
+
+  # --- the mutex: mkdir is atomic on every shell; a 30-minute-old lock dir is reclaimed once ---
+  mkdir -p "$root/.litopys" 2>/dev/null || true
+  if ! mkdir "$lock" 2>/dev/null; then
+    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+      rm -rf "$lock" 2>/dev/null || true
+    fi
+    if ! mkdir "$lock" 2>/dev/null; then
+      echo "locked" >&2
+      return 3
+    fi
+  fi
+  printf '%s %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$lock/owner" 2>/dev/null || true
+
+  mkdir -p "$raw" 2>/dev/null || true
+  mkdir -p "$raw/skipped" 2>/dev/null || true
+  if ! [ -f "$root/.litopys/.gitignore" ]; then
+    mkdir -p "$root/.litopys" 2>/dev/null || true
+    printf '*\n' > "$root/.litopys/.gitignore" 2>/dev/null || true
+  fi
+
+  local -a files=() remain=()
+  local f
+  for f in "$raw"/*.md; do
+    [ -f "$f" ] || continue
+    files+=("$f")
+  done
+
+  # --- eligibility FIRST, then the skip rule (review round 1, critical 1) -------------------
+  # A journal whose session may still be running is never moved and never selected, whatever
+  # its first line: otherwise the running `/litopys:distill` session's own journal is parked
+  # mid-session, the Stop hook re-creates it as a headless fragment, and the next run distills
+  # the plugin talking to itself. Only a journal that already passes eligibility (last block
+  # `## closed`, or mtime older than 60 minutes) can be parked or selected.
+  local skipped=0 started firstuser lastheader sid eligible epoch
+  local sidsafe rdate sid8 park seq tmplist=""
+  for f in ${files[@]+"${files[@]}"}; do
+    IFS=$'\x1f' read -r started firstuser lastheader sid < <(journal_scan "$f")
+    eligible=0
+    case "$lastheader" in
+      '## closed'*) eligible=1 ;;
+      *) if [ -n "$(find "$f" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then eligible=1; fi ;;
+    esac
+    if [ "$eligible" -eq 0 ]; then
+      remain+=("$f")
+      continue
+    fi
+
+    # skip rule: a bench journal - and a journal with no `## user` block at all, which is what
+    # a `/litopys:distill` run leaves behind - is parked in skipped/, never distilled.
+    case "$firstuser" in
+      ''|/litopys:recall*|/litopys:distill*)
+        if mv -f "$f" "$raw/skipped/$(basename "$f")" 2>/dev/null; then
+          skipped=$((skipped + 1))
+        else
+          remain+=("$f")
+        fi
+        continue
+        ;;
+    esac
+
+    # review round 1, major 4: a session resumed after it was distilled gets a fresh journal
+    # with the same session_id, which every `record` refuses (`record exists`) and which would
+    # otherwise hold a cap slot forever. Park it - no merge, the resumed part is not chronicled.
+    if [ -n "$sid" ] && [ -n "$started" ]; then
+      rdate="$(printf '%s' "$started" | cut -c1-10)"
+      sid8="$(printf '%s' "$sid" | cut -c1-8)"
+      if [ -f "$root/docs/chronicle/sessions/$rdate-$sid8.md" ]; then
+        sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
+        park="$raw/skipped/$sidsafe.resumed.md"
+        seq=2
+        while [ -e "$park" ]; do
+          park="$raw/skipped/$sidsafe.resumed.$seq.md"
+          seq=$((seq + 1))
+        done
+        if mv -f "$f" "$park" 2>/dev/null; then
+          skipped=$((skipped + 1))
+        else
+          remain+=("$f")
+        fi
+        continue
+      fi
+    fi
+
+    # --- a candidate: keep its sort key, by `started` (file mtime when absent) --------------
+    remain+=("$f")
+    epoch=""
+    if [ -n "$started" ]; then
+      epoch="$(date -u -d "$started" +%s 2>/dev/null || true)"
+    fi
+    if [ -z "$epoch" ]; then
+      epoch="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    fi
+    # Real tab and newline, and `printf %s` below: `%b` would interpret the backslash escapes
+    # of a Windows root (`\Users`, `\temp`, `\x..`) inside the path (review round 1, major 2).
+    tmplist="$tmplist$epoch"$'\t'"$f"$'\n'
+  done
+  local pending=${#remain[@]}
+
+  local -a selected=()
+  local sepoch sfile
+  while IFS=$'\t' read -r sepoch sfile; do
+    [ -n "$sfile" ] || continue
+    if [ "${#selected[@]}" -lt "$max" ]; then
+      selected+=("$sfile")
+    fi
+  done < <(printf '%s' "$tmplist" | sort -n -t $'\t' -k1,1)
+
+  local k=${#selected[@]}
+  for f in ${selected[@]+"${selected[@]}"}; do
+    printf '%s\n' "$f"
+  done
+  echo "skipped $skipped · pending $pending · selected $k" >&2
+
+  # --- the lock releases itself only when nothing was selected; `distill finish` releases it
+  # otherwise (C12) ----------------------------------------------------------------------------
+  if [ "$k" -eq 0 ]; then
+    rm -rf "$lock" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# --- distill finish (C12/C14) ---------------------------------------------------------------
+# Step 3 of the distiller: commit *only the paths this run wrote* - the manifest
+# `.litopys/distill.paths` that `distill record` appends to - on whatever branch the host is on,
+# and release the lock. Never a gate: a repo that cannot take the commit keeps the records in the
+# working tree and gets one line saying why, still exit 0. The host's index is never read and
+# never written outside those paths - one `git add -- <paths>` and one pathspec-limited
+# `git commit -- <paths>`, no `-a`, no `-A`, no `--no-verify`, and no `docs/chronicle` sweep
+# (an unrelated host file under `docs/chronicle/` stays out of the distill commit).
+
+git_block_reason() { # git_block_reason <root> - prints why this repo cannot take the commit ("" = it can)
+  local root="$1" gitdir
+  if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
+    printf '%s\n' "not a git repository"; return 0
+  fi
+  gitdir="$(git -C "$root" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [ -n "$gitdir" ]; then
+    # In-progress operations first: a real rebase also leaves HEAD detached, and "rebase in
+    # progress" is the more useful of the two reasons.
+    [ -e "$gitdir/MERGE_HEAD" ] && { printf '%s\n' "merge in progress"; return 0; }
+    if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+      printf '%s\n' "rebase in progress"; return 0
+    fi
+    [ -e "$gitdir/CHERRY_PICK_HEAD" ] && { printf '%s\n' "cherry-pick in progress"; return 0; }
+    [ -e "$gitdir/REVERT_HEAD" ] && { printf '%s\n' "revert in progress"; return 0; }
+  fi
+  if [ -z "$(git -C "$root" symbolic-ref -q HEAD 2>/dev/null || true)" ]; then
+    printf '%s\n' "detached HEAD"; return 0
+  fi
+  printf '%s\n' ""
+}
+
+git_error_line() { # git_error_line <stderr-file> - git's first real complaint, warnings skipped
+  local f="$1" line
+  line="$(awk 'NF && $0 !~ /^warning:/ { print; exit }' "$f" 2>/dev/null || true)"
+  [ -n "$line" ] || line="$(awk 'NF { print; exit }' "$f" 2>/dev/null || true)"
+  [ -n "$line" ] || line="git commit failed"
+  printf '%s\n' "$(trim "$line")"
+}
+
+distill_finish() {
+  if [ $# -gt 0 ]; then
+    echo "litopys distill finish: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+
+  local root lock manifest reason="" n sha errfile
+  root="$(project_root)"
+  lock="$root/.litopys/distill.lock"
+  manifest="$root/.litopys/distill.paths"
+
+  # --- the manifest, deduplicated, in the order it was written ------------------------------
+  local -a paths=()
+  local p q dup
+  if [ -f "$manifest" ]; then
+    while IFS= read -r p || [ -n "$p" ]; do
+      p="${p%$'\r'}"
+      [ -n "$p" ] || continue
+      [ -e "$root/$p" ] || continue
+      dup=0
+      for q in ${paths[@]+"${paths[@]}"}; do
+        if [ "$q" = "$p" ]; then dup=1; break; fi
+      done
+      [ "$dup" -eq 0 ] || continue
+      paths+=("$p")
+    done < "$manifest"
+  fi
+
+  reason="$(git_block_reason "$root")"
+  if [ -z "$reason" ]; then
+    errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.finish-stderr")"
+    if [ "${#paths[@]}" -eq 0 ]; then
+      reason="nothing to commit"
+    elif ! git -C "$root" add -- ${paths[@]+"${paths[@]}"} 2>"$errfile"; then
+      reason="$(git_error_line "$errfile")"
+    elif [ -z "$(git -C "$root" diff --cached --name-only -- ${paths[@]+"${paths[@]}"} 2>/dev/null || true)" ]; then
+      reason="nothing to commit"
+    else
+      # <n> is the number of distinct record paths this run wrote, never a row count from
+      # distill.jsonl and never a line count off the diff: a `--force` re-distillation appends
+      # a second chronicle line for the same session and must still say one (major 10 of the
+      # same review is not this story's, but the path count gets it right for free).
+      n=0
+      for p in ${paths[@]+"${paths[@]}"}; do
+        case "$p" in docs/chronicle/sessions/*.md) n=$((n + 1)) ;; esac
+      done
+      if git -C "$root" commit -m "chore(chronicle): distill $n session(s) [litopys]" -- ${paths[@]+"${paths[@]}"} > /dev/null 2>"$errfile"; then
+        sha="$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)"
+      else
+        reason="$(git_error_line "$errfile")"
+      fi
+    fi
+    rm -f "$errfile" 2>/dev/null || true
+  fi
+
+  # The lock goes whatever happened - a refused commit must not wedge the next run (C12). The
+  # manifest survives every refusal so a later `finish` commits the same paths; it goes once
+  # they are in a commit, or once there is nothing left in it to commit.
+  rm -rf "$lock" 2>/dev/null || true
+  if [ -z "$reason" ] || [ "$reason" = "nothing to commit" ]; then
+    rm -f "$manifest" 2>/dev/null || true
+  fi
+
+  if [ -n "$reason" ]; then
+    printf 'uncommitted: %s\n' "$reason"
+  else
+    printf 'committed %s\n' "${sha:-unknown}"
+  fi
+  return 0
+}
+
+cmd_distill() {
+  local verb="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$verb" in
+    record) distill_record "$@"; return $? ;;
+    next) distill_next "$@"; return $? ;;
+    finish) distill_finish "$@"; return $? ;;
+    "") echo "litopys distill: a verb is required (record, next, finish)" >&2; usage; return 2 ;;
+    *) echo "litopys distill: unknown verb '$verb'" >&2; usage; return 2 ;;
+  esac
+}
+
 SUB="${1:-help}"
 [ $# -gt 0 ] && shift
 case "$SUB" in
   append) cmd_append "$@"; exit $? ;;
   bench) cmd_bench "$@"; exit $? ;;
+  distill) cmd_distill "$@"; exit $? ;;
   --version|-v|version) echo "$VERSION"; exit 0 ;;
   help|--help|-h) usage; exit 0 ;;
   *) echo "litopys: unknown subcommand '$SUB'" >&2; usage; exit 2 ;;

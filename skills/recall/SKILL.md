@@ -16,13 +16,15 @@ final answer reaches the caller, never your search process.
 ## Search order
 
 Search in this fixed order, stopping once you can answer confidently:
-1. `docs/chronicle/` - dated project journal
-2. `docs/specs/*/brief.md` - what was asked and why, per spec
-3. `docs/adr/` - decisions and their rationale
-4. `docs/grill/` - raw discovery/synthesis documents
-5. `CHANGELOG*` - shipped changes, versions
-6. `git tag` - version/release markers
-7. `git log --oneline` - commit history, drilling down with `git show <sha>` or
+1. `docs/chronicle/sessions/` - distilled session records (grep the frontmatter `topics:` and
+   `links:` lines first, then the bodies); cite the record path in `**Refs:**`
+2. `docs/chronicle/` - dated project journal
+3. `docs/specs/*/brief.md` - what was asked and why, per spec
+4. `docs/adr/` - decisions and their rationale
+5. `docs/grill/` - raw discovery/synthesis documents
+6. `CHANGELOG*` - shipped changes, versions
+7. `git tag` - version/release markers
+8. `git log --oneline` - commit history, drilling down with `git show <sha>` or
    `git log -S"<term>"` when a candidate commit needs confirming
 
 ## Return

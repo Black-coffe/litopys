@@ -1,8 +1,8 @@
 ---
 story: litopys-phase-2-distill-05
 spec: litopys-phase-2-distill
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 3
 worker: worker-code
 model: opus
@@ -50,5 +50,11 @@ blocked_by: [litopys-phase-2-distill-04]
 `bash tests/distill.test.sh`
 
 ## Implementation notes
+- `bin/litopys`: added `distill finish` (`distill_finish` + helpers `git_block_reason`, `git_error_line`), the `finish` verb in `cmd_distill`, and two usage lines. No change to `record`/`next`/`bench`.
+- Refusal order is markers before detachment (`MERGE_HEAD` -> `rebase-merge|rebase-apply` -> `CHERRY_PICK_HEAD` -> `REVERT_HEAD` -> detached HEAD): a real rebase also detaches HEAD, and "rebase in progress" is the more useful reason. `REVERT_HEAD` is in the list for the same reason `CHERRY_PICK_HEAD` is - git refuses a partial commit in both.
+- `<n>` comes from `git diff --cached -- docs/chronicle` counting added lines containing ` · session · `; `distill.jsonl` is never read.
+- A failed `git commit` leaves `docs/chronicle/` staged (the `git add` is not rolled back) - the files are uncommitted but ready; nothing outside the pathspec is touched either way.
+- `git_error_line` takes git's first *non-empty, non-`warning:`* stderr line: on Windows `git commit` prefixes CRLF warnings, and "warning: in the working copy..." is not a reason.
+- `tests/distill.test.sh`: F1-F11 in throwaway `git init` repos (`newrepo`/`put_record`/`refuses` helpers). Checked live: missing identity really fails here (`Author identity unknown`); a failing `pre-commit` hook blocks and a passing one runs (marker file), so `--no-verify` is provably absent.
 
 ## Findings

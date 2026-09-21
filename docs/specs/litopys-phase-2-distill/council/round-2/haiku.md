@@ -1,0 +1,20 @@
+<!-- seat: haiku · model: claude-sonnet-5 · round: 2 · head: 0486c33 · pack: 0a6d59a43148 · attempt: 1 · recorded: 2026-09-21T16:56:12Z -->
+COUNCIL: litopys-phase-2-distill · round 2 · seat haiku
+MODEL: claude-sonnet-5
+COURT: E:/Projects/litopys/.vulyk/court/litopys-phase-2-distill/round-2
+VERDICT: GREEN
+ASSUMED CONFIG: Windows Git Bash, no browser MCP, single machine, no live claude API calls performed (cost/write avoidance)
+RAN: bash bin/litopys / --version / help / append (no args, bad kind) / distill record (no args) / distill finish / bench --delta; cat hooks/hooks.json; head agents/distiller.md agents/recall.md; find redact.sh; head scripts/redact.sh; bash hooks/session-start.sh; git status --porcelain
+PATH: CLI client path (`bin/litopys ...`) walked via help/version/error paths and safe no-write invocations; `claude --plugin-dir .` interactive /litopys:recall session and real `bin/litopys bench`/`append`/`distill record` runs were not exercised because they write/commit files or spend real API cost inside COURT, which this seat may not do
+ASK 1: GREEN - agents/distiller sonnet, flat frontmatter file - run: head agents/distiller.md saw: model: sonnet; run: bash bin/litopys help saw: `distill record` target format "docs/chronicle/sessions/<date>-<sid8>.md" with topics/links/source flags matching frontmatter fields
+ASK 2: GREEN - redact; commit off working branches; lock+cap N - run: bash bin/litopys distill finish (no lock, detached HEAD) saw: "uncommitted: detached HEAD", exit 0 - matches described safe-commit behaviour; run: bash bin/litopys help saw: "distill.lock mutex (stale after 30 minutes)" and "up to N (default 3) eligible journal paths"
+ASK 3: GREEN - PreCompact block - url: hooks/hooks.json saw: `"PreCompact":[{"hooks":[{"command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/raw-journal.sh\" compact"}]}]` registered
+ASK 4: GREEN - bench --delta vs baseline - run: bash bin/litopys bench --delta saw: "no baseline at .../.litopys/baseline.jsonl", exit 2, matching documented "fewer than ten rows exits 2"
+ASK 5: GREEN - plugin ships its own fallback redactor - run: find . -iname redact.sh; head scripts/redact.sh saw: header states fallback order "host project's own scripts/redact.sh wins ... then ${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh, then this file next to bin/"
+ASK 6: N/A - why: verifying `--ref` newline/`·` normalisation requires an actual `bin/litopys append` write+commit inside COURT; this seat may not write inside COURT even though the worktree is discarded afterward
+ASK 7: N/A - why: verifying the reopened-journal-after-`## closed` rule requires creating/appending raw journal files (a write) via hooks/raw-journal.sh, forbidden inside COURT
+ASK 8: N/A - why: verifying the `/litopys:recall`-first-line skip requires running `distill next` against a real journal, which takes the distill.lock mutex and moves files (a write), forbidden inside COURT
+ASK 9: N/A - why: bench comment-wording/summing/error-key behaviour is only observable by running real `bin/litopys bench`, which appends rows to baseline.jsonl (a write) and calls the real `claude` binary (real API cost) - both out of bounds for this read-only pass
+ASK 10: GREEN - hook/model/redact constraints - run: cat hooks/hooks.json saw: SessionStart/Stop/UserPromptSubmit/SessionEnd/PreCompact hooks call only raw-journal.sh/session-start.sh, no `claude -p` anywhere in the manifest; run: head agents/recall.md saw: model: sonnet; run: git status --porcelain after probing saw: no changes to any CLAUDE.md - "ничего не пишется в CLAUDE.md" holds for every command exercised
+UNASKED: `bash bin/litopys help` and bare `bash bin/litopys` (which falls through to help) print bash syntax errors to stderr before the usage text - "bin/litopys: command substitution: line 22: syntax error near unexpected token `newline'" plus fragments "committed <sha7>" / "uncommitted: <reason>" leaking from the `distill finish` help description - a real, always-reproducible stderr defect on the most basic client command (`--version` alone is clean); nobody asked about this but any client running `litopys help` sees it on every invocation.
+BREACH: none
