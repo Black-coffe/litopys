@@ -2,7 +2,7 @@
 story: litopys-phase-0-1-06
 spec: litopys-phase-0-1
 status: todo
-returned:
+returned: NEEDS_CONTEXT
 tier: 3
 worker: worker-code
 model: sonnet
@@ -46,3 +46,6 @@ Contract C8 in plan.md (what the journal is supposed to contain). Grill brief Ac
 ## Implementation notes
 
 ## Findings
+No ≥100k-token real session or `/export` file exists yet. The only raw journal on disk is `E:/Projects/vulyk/.litopys/raw/ac90b6ae-a213-4a9e-9330-f5d3c443b7c0.md` (339 bytes, 16 lines), a smoke test ("Say exactly: litopys hook smoke test"), not a real ≥100k-token VULYK session. No `/export` file was found anywhere under E:/Projects. Per the story's "Needs a human first" precondition, I cannot run the session myself. Please: run one real VULYK session past 100k tokens with `claude --plugin-dir E:/Projects/litopys`, `/export` it to a file, and give me both paths (the journal under `E:/Projects/vulyk/.litopys/raw/<session_id>.md` and the export file) plus the session's reported token count.
+
+Re-checked 2026-09-21 after story 05 landed: still unmet. `E:/Projects/vulyk/.litopys/raw/` holds exactly one file, the same 339-byte / 16-line smoke test (`ac90b6ae-a213-4a9e-9330-f5d3c443b7c0.md`, one `## user` + one `## assistant` block); `find` over E:/Projects for any `*/.litopys/raw/*` returns only that file, and no `/export` output exists under E:/Projects, `C:/Users/Andrei` (depth 2), Downloads or Desktop. Without both files the report's header, Losses and Kept criteria cannot be produced from evidence, and inventing them would be the opposite of what this story is for.
