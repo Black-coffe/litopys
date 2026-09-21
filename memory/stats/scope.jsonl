@@ -134,3 +134,5 @@
 {"ts":"2026-09-21T13:31:23Z","story":"litopys-phase-0-1-07-bench-tokens","declared":3,"changed":8,"out_of_scope":5}
 {"ts":"2026-09-21T13:31:51Z","story":"litopys-phase-0-1-08-golden-keyphrases","declared":1,"changed":4,"out_of_scope":3}
 {"ts":"2026-09-21T13:32:29Z","story":"litopys-phase-0-1-08-golden-keyphrases","declared":1,"changed":4,"out_of_scope":3}
+{"ts":"2026-09-21T13:48:51Z","story":"litopys-phase-0-1-09-raw-vs-export-losses","declared":1,"changed":4,"out_of_scope":3}
+{"ts":"2026-09-21T13:49:28Z","story":"litopys-phase-0-1-09-raw-vs-export-losses","declared":1,"changed":4,"out_of_scope":3}
