@@ -1,2 +1,5 @@
+* text=auto eol=lf
+*.png binary
+*.gif binary
 # --- VULYK: the Workflow driver must check out with LF (added by install.sh) ---
 .claude/workflows/*.js text eol=lf
