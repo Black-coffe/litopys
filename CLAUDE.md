@@ -145,6 +145,7 @@ Quiet variants only: everything these print is resent on every subsequent turn. 
 | Story 01 test | `bash tests/append.test.sh` |
 | Story 04 test | `bash tests/bench.test.sh` |
 | Story 05 test | `bash tests/hooks.test.sh` |
+| Story 03 shape check | `grep -c '^## Q[1-5] · ' examples/vulyk/golden-questions.md \| grep -qx 5 && grep -c '^- answer: ' examples/vulyk/golden-questions.md \| grep -qx 5 && grep -c '^- refs: ' examples/vulyk/golden-questions.md \| grep -qx 5` |
 | Full test suite | `for t in tests/*.test.sh; do bash "$t" \|\| exit 1; done` |
 | Lint | `git ls-files '*.sh' bin/* \| xargs -n1 bash -n && git ls-files '*.json' \| xargs -n1 jq -e . > /dev/null` |
 | Build / typecheck | `claude plugin validate .` |
