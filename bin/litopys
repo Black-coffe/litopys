@@ -15,7 +15,7 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 KINDS="grill brief verdict ship handoff note session"
 
 usage() {
@@ -34,8 +34,8 @@ litopys $VERSION
   litopys distill finish
       Commit only the paths this run wrote (.litopys/distill.paths) on the current branch,
       never the host's other staged or unstaged work, and release the distill lock.
-      Prints `committed <sha7>` or
-      `uncommitted: <reason>`; always exit 0.
+      Prints 'committed <sha7>' or
+      'uncommitted: <reason>'; always exit 0.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.

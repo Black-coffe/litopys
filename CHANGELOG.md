@@ -2,6 +2,11 @@
 
 All notable changes to litopys. Format: Keep a Changelog; versions follow semver.
 
+## [0.2.1] - 2026-09-21
+
+### Fixed
+- `bin/litopys help` (and the bare `bin/litopys`) no longer prints two bash syntax errors to stderr: the usage text carried backticks inside an unquoted heredoc (council round 2 UNASKED, haiku seat).
+
 ## [0.2.0] - 2026-09-21
 
 Phase 2 of the project-memory plugin (spec `litopys-phase-2-distill`).
