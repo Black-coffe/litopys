@@ -11,3 +11,4 @@
 - 2026-09-21T13:22:24Z · 04-council:RED · round 1 verdict RED at ac03fbe pack ac71211211e9 · next: repair
 - 2026-09-21T13:32:34Z · 03-building · close-story exit 2 (story 08) · next: verification cell added to ## Commands, story 08 closed by hand, relaunching
 - 2026-09-21T13:33:01Z · 04-council:open · round 2 opened, court at E:/Projects/litopys/.vulyk/court/litopys-phase-0-1/round-2 · next: dispatch:haiku,sonnet,opus,review
+- 2026-09-21T13:42:23Z · 04-council:RED · round 2 verdict RED at ebda9de pack e16ac0b7e26a · next: repair
