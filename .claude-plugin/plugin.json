@@ -5,5 +5,13 @@
   "author": {
     "name": "Andrei"
   },
-  "keywords": ["memory", "chronicle", "wiki", "vulyk"]
+  "keywords": [
+    "memory",
+    "chronicle",
+    "wiki",
+    "vulyk"
+  ],
+  "homepage": "https://github.com/Black-coffe/litopys",
+  "repository": "https://github.com/Black-coffe/litopys",
+  "license": "MIT"
 }

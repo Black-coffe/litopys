@@ -122,14 +122,14 @@ seat only - fill it only when a separate, read-only test profile already exists.
 | Field | Value |
 |---|---|
 | Stack | Claude Code plugin: bash (Git Bash on Windows, sh on Linux/macOS) + markdown skills/agents + `hooks/hooks.json`; no compiler |
-| Package manager / runner | none; loaded with `claude --plugin-dir E:/Projects/litopys` |
+| Package manager / runner | none; loaded with `claude --plugin-dir <path-to-litopys>` |
 | Where source lives | `bin/` (CLI), `hooks/` (event scripts + hooks.json), `skills/<name>/SKILL.md`, `agents/*.md`, `.claude-plugin/plugin.json` |
 | Test framework | `tests/*.test.sh` (plain bash, exit 0 = green), same style as VULYK |
 | Commit convention | conventional commits (`feat:`, `fix:`, `chore:`, `docs:`) |
 | **Configurations that exist today** | single machine, one project dir at a time, no database; Windows Git Bash is the primary target, Linux/macOS sh must not break; no model calls inside hooks (deferred to skills/agents) |
 | Client path | `claude --plugin-dir . ` then `/litopys:recall <question>`; CLI: `bin/litopys append ...`, `bin/litopys bench` |
 | Browser MCP | none |
-| Release / deploy | default branch `main`; version in `.claude-plugin/plugin.json`; publish = tag + push + marketplace entry (private directory marketplace, like E:/Projects/tools/crisp); the owner presses |
+| Release / deploy | default branch `main`; version in `.claude-plugin/plugin.json`; publish = tag + push to GitHub (Black-coffe/litopys, the repo is its own marketplace); the owner presses |
 | Telemetry | off - anonymized weekly anomaly bundle (codes and numbers only, docs/telemetry.md); on = /vulyk-evolve prints the send command, never sends |
 <!-- VULYK:PROFILE:END -->
 
