@@ -64,6 +64,11 @@ block. Then the recon's micro-defects, docs, and the 0.3.0 release.
 *(empty)*
 
 ## Plan deltas
+- 2026-09-29, story 01 return (surprise note): the guard is correct in this repo too, so its first
+  real session here will write the litopys block into this repo's own `.gitignore`. Decision: story
+  03 ships that block as part of the release (`.gitignore` added to its `## Files`), so the owner's
+  next session starts on the quiet ok line instead of an uncommitted change. Rejected: leaving it to
+  the next session - a dirty tree right after a release.
 
 **Approved:** <owner, date - stage 02, the unconditional gate. /vulyk-build refuses without this line.>
 **Briefed:** via grill, Andrei, 2026-09-28
