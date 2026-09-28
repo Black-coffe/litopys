@@ -1,8 +1,8 @@
 ---
 story: litopys-privacy-guard-02
 spec: litopys-privacy-guard
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: sonnet
@@ -51,5 +51,10 @@ memory/map/litopys-plugin.md - Entry points (distill record/next), Gotchas.
 for t in tests/*.test.sh; do bash "$t" || exit 1; done
 
 ## Implementation notes
+- `distill record`: a redactor that fails or prints nothing -> exit 2, nothing written, journal stays queued (was: unfiltered record written). New `record_rel` builds the record path for both `record` and `next`'s resumed-session check: date must look like a date (else the clock's, else zeros), id keeps `[A-Za-z0-9_-]` only.
+- `distill next`: sort key is the ISO `started` string (text sort, `LC_ALL=C`), fallback `date -u -r <file>` (GNU, BSD, busybox); `date -d`/`stat -c` gone. Stale-lock reclaim renames the lock aside and re-checks what it moved; a fresh lock goes back.
+- `json_str`: backslash, quote, tab, CR, LF escaped in pure bash, other control chars dropped. Surprise: bash 5.2 `patsub_replacement` ate an unquoted backslash in `${s//.../$bs$bs}` - replacements are now quoted; test P7 caught it.
+- Banner counts month files only; `agents/recall.md` wording fixed; `touch -d` -> POSIX `touch -t`.
+- Tests: P6 (failing redactor), P7 (hostile frontmatter + JSON escaping), banner fixture gains golden-questions.md.
 
 ## Findings

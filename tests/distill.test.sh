@@ -226,6 +226,34 @@ LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$M/nope.md" --body "$FI
 eq "missing journal exits 2" "2" "$?"
 no_file "missing journal writes nothing" "$M/docs"
 
+# --- P6: a redactor that fails is never a passthrough -------------------------------------------
+X="$T/p6-badfilter"
+mkdir -p "$X/scripts" "$X/.litopys/raw"
+printf 'exit 1\n' > "$X/scripts/redact.sh"
+mkjournal "$X/.litopys/raw/$SID.md" "$SID" "2026-09-20T10:00:00Z" "do work" closed
+err="$(CLAUDE_PROJECT_DIR="$X" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+  --journal "$X/.litopys/raw/$SID.md" --body "$FIX/distill-body.md" 2>&1 >/dev/null)"
+eq "P6 failing redactor exits 2" "2" "$?"
+printf '%s' "$err" | expect "P6 says the redactor failed" "the redactor"
+no_file "P6 no unfiltered record written" "$X/$REL"
+[ -f "$X/.litopys/raw/$SID.md" ]
+eq "P6 journal stays in the queue" "0" "$?"
+
+# --- P7: journal frontmatter is data, never a path --------------------------------------------
+Y="$T/p7-evil"
+mkdir -p "$Y/.litopys/raw"
+mkjournal "$Y/.litopys/raw/evil.md" "../../x/../y" "../../../etc" "do work" closed
+out="$(CLAUDE_PROJECT_DIR="$Y" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+  --journal "$Y/.litopys/raw/evil.md" --body "$FIX/distill-body.md" --model $'son\tnet\\x' 2>/dev/null)"
+eq "P7 a hostile id and date still give one sanitised record path" \
+  "docs/chronicle/sessions/2026-09-21-______x_.md" "$out"
+[ -f "$Y/$out" ]
+eq "P7 the record is inside docs/chronicle/sessions/" "0" "$?"
+no_file "P7 nothing climbed out of the project" "$T/x"
+tail -n 1 "$Y/.litopys/distill.jsonl" | jq -e . > /dev/null 2>&1
+eq "P7 distill.jsonl row with a tab and a backslash is still valid JSON" "0" "$?"
+eq "P7 the model survives the round trip" $'son\tnet\\x' "$(tail -n 1 "$Y/.litopys/distill.jsonl" | jq -r .model)"
+
 # --- P5: the verb itself ---------------------------------------------------------------------
 err="$(bash "$CLI" distill 2>&1 >/dev/null)"
 eq "distill with no verb exits 2" "2" "$?"
@@ -309,7 +337,7 @@ else bad "N3 open-session journal moved"; fi
 if [ -f "$Q4/.litopys/raw/running.md" ]; then echo "  ok    N3 live /litopys:distill journal left at the top level"
 else bad "N3 the running distill journal was moved mid-session"; fi
 rm -rf "$Q4/.litopys/distill.lock"
-touch -d '61 minutes ago' "$Q4/.litopys/raw/running.md"
+touch -t 202001010000 "$Q4/.litopys/raw/running.md"   # POSIX touch -t: long past 60 minutes
 out2="$(bash "$CLI" distill next 2>"$T/n4b.err")"
 eq "N3 aged /litopys:distill journal is skipped, never printed" "" "$out2"
 eq "N3 aged distill journal stderr: skipped 1 pending 1 selected 0" \
@@ -317,7 +345,7 @@ eq "N3 aged distill journal stderr: skipped 1 pending 1 selected 0" \
 if [ -f "$Q4/.litopys/raw/skipped/running.md" ]; then echo "  ok    N3 aged distill journal moved to skipped/"
 else bad "N3 aged distill journal not in skipped/"; fi
 rm -rf "$Q4/.litopys/distill.lock"
-touch -d '61 minutes ago' "$Q4/.litopys/raw/open.md"
+touch -t 202001010000 "$Q4/.litopys/raw/open.md"
 out3="$(bash "$CLI" distill next 2>/dev/null)"
 printf '%s' "$out3" | expect "N3 open session printed once its mtime ages past 60 minutes" "open.md"
 
@@ -416,7 +444,7 @@ eq "N7 second run stdout empty" "" "$out2"
 eq "N7 second run stderr is locked" "locked" "$(cat "$T/n8.err")"
 if [ -f "$Q9/.litopys/raw/lk.md" ]; then echo "  ok    N7 locked run moved no file"
 else bad "N7 locked run moved the journal"; fi
-touch -d '31 minutes ago' "$Q9/.litopys/distill.lock"
+touch -t 202001010000 "$Q9/.litopys/distill.lock"   # long past the 30-minute reclaim
 out3="$(bash "$CLI" distill next 2>/dev/null)"
 eq "N7 stale lock reclaimed, run proceeds" "$Q9/.litopys/raw/lk.md" "$out3"
 

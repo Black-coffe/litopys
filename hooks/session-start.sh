@@ -51,13 +51,14 @@ fi
 version="$(jq -r '.version // empty' "$plugin_root/.claude-plugin/plugin.json" 2>/dev/null || true)"
 [ -n "$version" ] || version="0.2.1"
 
-count_md() { # count_md <dir> - .md files directly in <dir>, 0 when it does not exist
+count_md() { # count_md <dir> [glob] - files matching <glob> (default *.md) directly in <dir>
   local n=0 f
-  for f in "$1"/*.md; do [ -f "$f" ] && n=$((n + 1)); done
+  for f in "$1"/${2:-*.md}; do [ -f "$f" ] && n=$((n + 1)); done
   printf '%s' "$n"
 }
 
-chronicles="$(count_md "$root/docs/chronicle")"
+# Month files only: golden-questions.md lives in docs/chronicle/ too, and it is no chronicle.
+chronicles="$(count_md "$root/docs/chronicle" '[0-9][0-9][0-9][0-9]-[0-9][0-9].md')"
 raws="$(count_md "$root/.litopys/raw")"
 
 if [ "$raws" -gt 0 ]; then

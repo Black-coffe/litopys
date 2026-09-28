@@ -569,8 +569,29 @@ csv_list() { # csv_list "a, b" -> "[a, b]"   (empty -> "[]")
   printf '[%s]' "$out"
 }
 
-json_str() { # json_str <text> - minimal JSON string escaping (no jq dependency here)
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+json_str() { # json_str <text> - JSON string escaping without jq: backslash, quote, tab, CR and
+             # LF escaped, any other control character dropped - one row stays one line
+  local s="$1" bs='\' q='"'
+  # Replacements quoted: with bash 5.2's patsub_replacement an unquoted backslash is eaten.
+  s="${s//"$bs"/"$bs$bs"}"
+  s="${s//"$q"/"$bs$q"}"
+  s="${s//$'\t'/"${bs}t"}"
+  s="${s//$'\r'/"${bs}r"}"
+  s="${s//$'\n'/"${bs}n"}"
+  printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037'
+}
+
+# The record path is built from journal frontmatter, which is data and never a path: the date
+# must look like a date (else the fallback clock's, else zeros) and the id keeps [A-Za-z0-9_-]
+# only - no `/`, no `.`, nothing that can climb out of docs/chronicle/sessions/. `distill next`
+# derives the same path to spot a resumed session, so both go through this one function.
+record_rel() { # record_rel <started> <sid> <fallback-ts> - docs/chronicle/sessions/<date>-<sid8>.md
+  local d s
+  d="$(printf '%s' "$1" | cut -c1-10)"
+  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;; *) d="$(printf '%s' "$3" | cut -c1-10)" ;; esac
+  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;; *) d="0000-00-00" ;; esac
+  s="$(printf '%s' "$2" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-8)"
+  printf 'docs/chronicle/sessions/%s-%s.md\n' "$d" "$s"
 }
 
 bytes() { # bytes <file> - size in bytes, digits only
@@ -676,17 +697,13 @@ distill_record() {
   fi
 
   # --- paths -------------------------------------------------------------------------------
-  local root now rdate sid8 sidsafe rel file
+  local root now rdate sidsafe rel file
   root="$(project_root)"
   now="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-  if [ -n "$started" ]; then
-    rdate="$(printf '%s' "$started" | cut -c1-10)"
-  else
-    rdate="$(printf '%s' "$now" | cut -c1-10)"; started="-"
-  fi
-  sid8="$(printf '%s' "$sid" | cut -c1-8)"
+  rel="$(record_rel "$started" "$sid" "$now")"
+  rdate="${rel#docs/chronicle/sessions/}"; rdate="${rdate:0:10}"
+  [ -n "$started" ] || started="-"
   sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
-  rel="docs/chronicle/sessions/$rdate-$sid8.md"
   file="$root/$rel"
 
   if [ -f "$file" ] && [ "$force" -ne 1 ]; then
@@ -724,11 +741,14 @@ RECORD
   fi
   filter="$(redactor "$root")"
   tmp="$file.tmp.$$"
+  # A filter that fails or prints nothing must not become a passthrough: the unfiltered record
+  # is refused (exit 2, journal still queued) instead of written.
   if printf '%s\n' "$record" | redact_filter "$filter" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv "$tmp" "$file"
   else
     rm -f "$tmp" 2>/dev/null || true
-    printf '%s\n' "$record" > "$file"
+    echo "litopys distill record: the redactor ($filter) failed - record not written, journal left in the queue" >&2
+    return 2
   fi
 
   # --- one chronicle line, through cmd_append's own path (one writer for the monthly file) --
@@ -825,8 +845,15 @@ distill_next() {
   # --- the mutex: mkdir is atomic on every shell; a 30-minute-old lock dir is reclaimed once ---
   ensure_scratch "$root" || true
   if ! mkdir "$lock" 2>/dev/null; then
-    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
-      rm -rf "$lock" 2>/dev/null || true
+    # Reclaim by rename, then re-check what was renamed: a second reclaimer that saw the same
+    # stale lock can only ever move a lock aside, and a fresh one it moved goes straight back.
+    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
+      && mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+      if [ -n "$(find "$lock.stale.$$" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+        rm -rf "$lock.stale.$$" 2>/dev/null || true
+      else
+        mv "$lock.stale.$$" "$lock" 2>/dev/null || rm -rf "$lock.stale.$$" 2>/dev/null || true
+      fi
     fi
     if ! mkdir "$lock" 2>/dev/null; then
       echo "locked" >&2
@@ -851,8 +878,8 @@ distill_next() {
   # mid-session, the Stop hook re-creates it as a headless fragment, and the next run distills
   # the plugin talking to itself. Only a journal that already passes eligibility (last block
   # `## closed`, or mtime older than 60 minutes) can be parked or selected.
-  local skipped=0 started firstuser lastheader sid eligible epoch
-  local sidsafe rdate sid8 park seq tmplist=""
+  local skipped=0 started firstuser lastheader sid eligible
+  local sidsafe park seq key tmplist=""
   for f in ${files[@]+"${files[@]}"}; do
     IFS=$'\x1f' read -r started firstuser lastheader sid < <(journal_scan "$f")
     eligible=0
@@ -882,9 +909,7 @@ distill_next() {
     # with the same session_id, which every `record` refuses (`record exists`) and which would
     # otherwise hold a cap slot forever. Park it - no merge, the resumed part is not chronicled.
     if [ -n "$sid" ] && [ -n "$started" ]; then
-      rdate="$(printf '%s' "$started" | cut -c1-10)"
-      sid8="$(printf '%s' "$sid" | cut -c1-8)"
-      if [ -f "$root/docs/chronicle/sessions/$rdate-$sid8.md" ]; then
+      if [ -f "$root/$(record_rel "$started" "$sid" "$started")" ]; then
         sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
         park="$raw/skipped/$sidsafe.resumed.md"
         seq=2
@@ -901,29 +926,30 @@ distill_next() {
       fi
     fi
 
-    # --- a candidate: keep its sort key, by `started` (file mtime when absent) --------------
+    # --- a candidate: keep its sort key, the UTC ISO `started` (file mtime when absent) ------
+    # ISO-8601 UTC sorts as text, so no `date -d` / `stat -c` (GNU-only; on BSD every key read
+    # 0 and the queue order was silently wrong). `date -r <file>` is GNU, BSD and busybox alike.
     remain+=("$f")
-    epoch=""
-    if [ -n "$started" ]; then
-      epoch="$(date -u -d "$started" +%s 2>/dev/null || true)"
-    fi
-    if [ -z "$epoch" ]; then
-      epoch="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
-    fi
+    key="$started"
+    case "$key" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) key="$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+         [ -n "$key" ] || key="0000-00-00T00:00:00Z" ;;
+    esac
     # Real tab and newline, and `printf %s` below: `%b` would interpret the backslash escapes
     # of a Windows root (`\Users`, `\temp`, `\x..`) inside the path (review round 1, major 2).
-    tmplist="$tmplist$epoch"$'\t'"$f"$'\n'
+    tmplist="$tmplist$key"$'\t'"$f"$'\n'
   done
   local pending=${#remain[@]}
 
   local -a selected=()
-  local sepoch sfile
-  while IFS=$'\t' read -r sepoch sfile; do
+  local skey sfile
+  while IFS=$'\t' read -r skey sfile; do
     [ -n "$sfile" ] || continue
     if [ "${#selected[@]}" -lt "$max" ]; then
       selected+=("$sfile")
     fi
-  done < <(printf '%s' "$tmplist" | sort -n -t $'\t' -k1,1)
+  done < <(printf '%s' "$tmplist" | LC_ALL=C sort -t $'\t' -k1,1)
 
   local k=${#selected[@]}
   for f in ${selected[@]+"${selected[@]}"}; do

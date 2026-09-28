@@ -24,8 +24,8 @@ Search in this order, stopping as soon as you have enough to answer confidently:
    `git log -S"<term>"` only when a candidate commit needs confirming
 
 Use `Grep`/`Glob` to search file contents and names under `docs/`; use `Bash` only for the git
-commands above (and `git show`/`git log -S` for drill-down). Do not run destructive or
-write-capable git commands - you have no tool that can write files, and none is needed here.
+commands above (and `git show`/`git log -S` for drill-down). Never run a command that writes -
+no destructive or write-capable git, no redirection into files; answering needs none.
 
 ## Return shape
 
