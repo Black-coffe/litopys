@@ -10,8 +10,10 @@
 # the project's .gitignore and its status also goes to the owner as the top-level systemMessage.
 set -u
 
-# ${0%/*}, not dirname: the no-jq path below must work with nothing but bash itself.
-plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "${0%/*}/.." 2>/dev/null && pwd)}"
+# ${0%/*}, not dirname: the no-jq path below must work with nothing but bash itself. A $0
+# without a slash (`bash session-start.sh` from hooks/) means the script sits in the cwd.
+case "$0" in */*) here="${0%/*}" ;; *) here="." ;; esac
+plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$here/.." 2>/dev/null && pwd)}"
 
 privacy_line() { # privacy_line [root] - the guard's one line, or a loud line when the guard itself failed
   local line
@@ -26,9 +28,16 @@ privacy_line() { # privacy_line [root] - the guard's one line, or a loud line wh
 
 # With jq absent the banner degrades to one honest static line - but the privacy guard still
 # runs: it needs no jq, and its line never contains `"` or `\`, so it is embedded as is.
+privacy_hint() { # privacy_hint <line> - the model's copy: plus the no-force-add rule in a git repo
+  case "$1" in
+    *"not a git repository"*|*"git not found"*) printf '%s' "$1" ;;
+    *) printf '%s' "$1 · never git add -f these paths" ;;
+  esac
+}
+
 if ! command -v jq > /dev/null 2>&1; then
   privacy="$(privacy_line)"
-  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[litopys] jq not found - raw journal disabled\\n%s"}}\n' "$privacy" "$privacy"
+  printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[litopys] jq not found - raw journal disabled\\n%s"}}\n' "$privacy" "$(privacy_hint "$privacy")"
   exit 0
 fi
 
@@ -75,10 +84,7 @@ last="$(cat "$root"/docs/chronicle/*.md 2>/dev/null \
 
 # C17 - the guard runs against the same root the banner counts in.
 privacy="$(privacy_line "$root")"
-case "$privacy" in
-  *"not a git repository"*|*"git not found"*) privacy_ctx="$privacy" ;;
-  *) privacy_ctx="$privacy · never git add -f these paths" ;;
-esac
+privacy_ctx="$(privacy_hint "$privacy")"
 
 ctx="$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
   "[litopys] v$version · project chronicle" \

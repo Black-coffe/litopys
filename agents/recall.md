@@ -23,8 +23,17 @@ Search in this order, stopping as soon as you have enough to answer confidently:
 8. `git log --oneline` (commit history), drilling down with `git show <sha>` or
    `git log -S"<term>"` only when a candidate commit needs confirming
 
-Use `Grep`/`Glob` to search file contents and names under `docs/`; use `Bash` only for the git
-commands above (and `git show`/`git log -S` for drill-down). Never run a command that writes -
+`docs/chronicle/` is git-ignored by default (litopys keeps it private), and `Grep` skips
+git-ignored files: from the project root or from `docs/chronicle/` it sees neither the month
+files nor the session records. Search stages 1-2 with git's own grep, which reads ignored files:
+
+```
+git grep --no-index --no-exclude-standard -n -i -e '<term>' -- docs/chronicle
+```
+
+List those files with `Glob` (`docs/chronicle/**/*.md`) and open them with `Read`. For the rest
+of `docs/` use `Grep`/`Glob`. Use `Bash` only for the git commands named here (`git grep` above,
+`git tag`, `git log`, and `git show`/`git log -S` for drill-down). Never run a command that writes -
 no destructive or write-capable git, no redirection into files; answering needs none.
 
 ## Return shape

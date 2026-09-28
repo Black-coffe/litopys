@@ -104,12 +104,28 @@ guard "$R" > /dev/null
 out="$(guard "$R")"
 printf '%s' "$out" | expect "G5 loud" "[litopys] PRIVACY:"
 printf '%s' "$out" | expect "G5 counts the tracked litopys files (not golden-questions)" "2 litopys file(s) already tracked by git"
-printf '%s' "$out" | expect "G5 gives the ready command" "git ls-files -ci --exclude-standard -z -- .litopys docs/chronicle | xargs -0 git rm --cached --quiet --"
+printf '%s' "$out" | expect "G5 gives the ready command" "git ls-files -ci --exclude-standard -z -- .litopys '*/.litopys/*' docs/chronicle | xargs -0 git rm --cached --quiet --"
 eq "G5 index untouched" "3" "$(git -C "$R" ls-files | grep -c chronicle)"
 eq "G5 nothing staged" "" "$(git -C "$R" diff --cached --name-only)"
-( cd "$R" && git ls-files -ci --exclude-standard -z -- .litopys docs/chronicle | xargs -0 git rm --cached --quiet -- )
+printed() { # printed <status line> - the untrack command exactly as the guard printed it
+  local c="${1#*untrack: }"; printf '%s' "${c%% ; then commit*}"
+}
+( cd "$R" && eval "$(printed "$out")" ) > /dev/null 2>&1
+eq "G5 the printed command runs" "0" "$?"
 guard "$R" | expect "G5 after the printed command: ok" "git-ignored ✓"
 git -C "$R" ls-files | expect "G5 the command keeps golden-questions tracked" "docs/chronicle/golden-questions.md"
+
+# --- G5b: a nested sub/.litopys/ is counted and the printed command clears it too ---------------
+R="$(newrepo g5b)"
+mkdir -p "$R/sub/.litopys/raw"
+printf 'j\n' > "$R/sub/.litopys/raw/j.md"
+git -C "$R" add -A > /dev/null 2>&1
+git -C "$R" commit -qm seed > /dev/null 2>&1
+out="$(guard "$R")"
+printf '%s' "$out" | expect "G5b nested tracked journal counted" "1 litopys file(s) already tracked by git"
+( cd "$R" && eval "$(printed "$out")" ) > /dev/null 2>&1
+eq "G5b the printed command runs" "0" "$?"
+guard "$R" | expect "G5b ... and clears the warning" "git-ignored ✓"
 
 # --- G6: a later rule that undoes the block is reported, not patched --------------------------
 R="$(newrepo g6)"
@@ -117,6 +133,17 @@ guard "$R" > /dev/null
 printf '!docs/chronicle/sessions/\n' >> "$R/.gitignore"
 guard "$R" | expect "G6 override is loud" "NOT ignored: docs/chronicle/sessions/ - a later .gitignore rule overrides the litopys block"
 tail -n 1 "$R/.gitignore" | expect "G6 the owner's rule is left where it is" "!docs/chronicle/sessions/"
+
+# --- G6b: a rule that un-ignores real month files while every probe name stays ignored ----------
+# (`!docs/chronicle/sessions/2026-*` would not do it: git never re-includes a file whose parent
+# directory is excluded, and `docs/chronicle/*` excludes `sessions/` itself.)
+R="$(newrepo g6b)"
+guard "$R" > /dev/null
+printf '!docs/chronicle/2026-*.md\n' >> "$R/.gitignore"
+mkdir -p "$R/docs/chronicle"
+printf -- '- line\n' > "$R/docs/chronicle/2026-09.md"
+ignored "$R" docs/chronicle/probe.md; eq "G6b every probe name is still ignored" "0" "$?"
+guard "$R" | expect "G6b real files git would add are loud" "1 litopys file(s) NOT ignored - git would add them"
 
 # --- G7: the owner's opt-in - docs/chronicle/ trackable, .litopys/ never ----------------------
 R="$(newrepo g7)"
@@ -143,11 +170,44 @@ printf '%s' "$out" | refute "G9 append's stdout stays the chronicle line" "git-i
 expect "G9 append notes the .gitignore change on stderr" "litopys: git-ignored .litopys/ docs/chronicle/" < "$T/g9.err"
 ignored "$R" docs/chronicle/2026-09.md; eq "G9 the month file append wrote is ignored" "0" "$?"
 
+# --- G11: recall can still search the git-ignored chronicle ---------------------------------
+# Grep (ripgrep) skips ignored files; the command recall is told to use must find month files and
+# session records anyway. The literal lives in agents/recall.md and the skill - checked here.
+RECALL_CMD="git grep --no-index --no-exclude-standard -n -i -e"
+grep -qF -- "$RECALL_CMD '<term>' -- docs/chronicle" "$SRC/agents/recall.md"
+eq "G11 agents/recall.md names the ignored-file search" "0" "$?"
+grep -qF -- "$RECALL_CMD '<term>' -- docs/chronicle" "$SRC/skills/recall/SKILL.md"
+eq "G11 the recall skill names it too" "0" "$?"
+grep -q '^allowed-tools:.*Bash(git grep:\*)' "$SRC/skills/recall/SKILL.md"
+eq "G11 the recall skill may run git grep" "0" "$?"
+R="$(newrepo g11)"
+guard "$R" > /dev/null
+mkdir -p "$R/docs/chronicle/sessions"
+printf -- '- 2026-09-01T10:00:00Z · note · a.md · ZEBRA month\n' > "$R/docs/chronicle/2026-09.md"
+printf 'ZEBRA record\n' > "$R/docs/chronicle/sessions/2026-09-01-abcdef12.md"
+ignored "$R" docs/chronicle/2026-09.md; eq "G11 the month file is ignored" "0" "$?"
+hits="$(cd "$R" && $RECALL_CMD 'zebra' -- docs/chronicle 2>/dev/null)"
+printf '%s' "$hits" | expect "G11 the search finds the ignored month file" "docs/chronicle/2026-09.md"
+printf '%s' "$hits" | expect "G11 the search finds the ignored session record" "docs/chronicle/sessions/2026-09-01-abcdef12.md"
+
+# --- G12: a symlinked .gitignore is checked, never written through ---------------------------
+R="$(newrepo g12)"
+ln -s "$T/g12-outside" "$R/.gitignore" 2> /dev/null
+if [ -L "$R/.gitignore" ]; then
+  guard "$R" > /dev/null
+  no_file "G12 a dangling symlink is not followed out of the project" "$T/g12-outside"
+  [ -L "$R/.gitignore" ]; eq "G12 the symlink itself is left alone" "0" "$?"
+else
+  rm -f "$R/.gitignore"
+  echo "  skip  G12 this filesystem made a copy, not a symlink (Windows without symlink rights)"
+fi
+
 # --- G10: the status line never carries a quote or a backslash (embedded raw in JSON) ----------
 for r in "$T"/g*/; do   # directories only: a file path is no project root and would fall
                        # back to the git toplevel of this very repository
   out="$(guard "${r%/}")"
   case "$out" in *'"'*|*'\'*) bad "G10 $r: quote or backslash in '$out'" ;; esac
+  printf '{"m":"%s"}' "$out" | jq -e . > /dev/null 2>&1 || bad "G10 $r: not embeddable raw in JSON: '$out'"
 done
 echo "  ok    G10 no quote or backslash in any status line"
 eq "G10 privacy takes no arguments" "2" "$(bash "$CLI" privacy --fix > /dev/null 2>&1; echo $?)"

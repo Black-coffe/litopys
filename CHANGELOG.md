@@ -12,17 +12,21 @@ Private by default (spec `litopys-privacy-guard`, ADR-010).
 - **Loud when it matters.** The line turns into `[litopys] PRIVACY:` when the block had to be added or repaired, when a later rule overrides it, or when git already tracks litopys files. For tracked files it prints the exact untrack command; the index is never touched.
 - **Records are no longer committed.** `/litopys:distill` ends with `kept local`. `LITOPYS_TRACK_CHRONICLE=1` is the explicit opt-in that restores the 0.2.x pathspec-limited commit for team repos.
 - **A failing secret filter no longer lets a record through.** `distill record` refuses (exit 2, journal stays queued) instead of writing the unfiltered text.
-- **The raw journal fails closed.** It is not written when `.litopys/.gitignore` cannot be. Every `.litopys/` writer now goes through one `ensure_scratch` helper; seven of them used to skip the self-ignore.
+- **The raw journal fails closed.** It is not written when `.litopys/.gitignore` cannot be. Every `.litopys/` writer in `bin/litopys` now goes through one `ensure_scratch` helper; several used to rely on another writer having created the self-ignore first.
+- **The guard checks real files, not only probe names.** A rule that un-ignores actual litopys files (`git ls-files --others`) is reported, and the printed untrack command covers exactly the counted paths, nested `sub/.litopys/` included.
+- **A symlinked `.gitignore` is never written through**, so a checkout cannot redirect the write outside the project.
+- **`kept local` says only what git confirms**: outside git, or when a rule overrides the block, the line says so.
 - **Journal frontmatter can no longer shape a record path.** The date must look like a date and the id keeps `[A-Za-z0-9_-]` only.
 
 ### Fixed
 - `distill next` ordered the queue with GNU-only `date -d` / `stat -c`, so on macOS/BSD every journal read as epoch 0. It now sorts on the ISO `started` string, with `date -r` as the mtime fallback.
 - A stale `distill.lock` is reclaimed by rename and re-check, so two reclaimers can no longer delete each other's fresh lock.
-- `distill.jsonl` rows escape tab, CR and LF (and drop other control characters), so one row stays one valid JSON line.
+- `distill.jsonl` rows escape tab, CR and LF (and drop other control characters), so one row stays one valid JSON line, on every bash from 3.2 (stock macOS) up.
 - The banner's chronicle count no longer counts `golden-questions.md` as a month file.
 - The tests no longer use GNU-only `touch -d`.
 
 ### Changed
+- `/litopys:recall` searches the git-ignored chronicle with `git grep --no-index --no-exclude-standard`: Claude Code's `Grep` (ripgrep) skips ignored files.
 - The SessionStart banner is six lines (was five).
 - The descriptions in `plugin.json` and `marketplace.json`, the README, the distiller's return shape (`kept local: <reason>`, the `committed ` prefix) and `agents/recall.md`'s tool claim now match the code.
 - Removed six stale `.gitkeep` files.

@@ -125,13 +125,16 @@ privacy_label() { # the protected paths, for humans
 # Markers match by prefix, so a later version's reworded marker still finds an older block. The
 # block is the last begin marker before the first end marker; a begin with no end after it is
 # never a block, so a half-deleted block cannot swallow the rest of the owner's file.
-ensure_private() { # ensure_private <root> - prints ok|added|updated|nogit|nogitbin|failed
+ensure_private() { # ensure_private <root> - prints ok|added|updated|symlink|nogit|nogitbin|failed
   local root="$1" gi want have tmp
   if ! command -v git > /dev/null 2>&1; then printf 'nogitbin\n'; return 0; fi
   if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
     printf 'nogit\n'; return 0
   fi
   gi="$root/.gitignore"
+  # A symlinked .gitignore is the owner's own arrangement (or a trap in an untrusted checkout):
+  # never written through, never replaced. cmd_privacy's git checks still judge the result.
+  if [ -L "$gi" ]; then printf 'symlink\n'; return 0; fi
   want="$(privacy_block)"
   if [ ! -f "$gi" ]; then
     if printf '%s\n' "$want" > "$gi" 2>/dev/null; then printf 'added\n'; else printf 'failed\n'; fi
@@ -175,7 +178,13 @@ cmd_privacy() {
   if [ $# -gt 0 ]; then
     echo "litopys privacy: takes no arguments (got '$1')" >&2; usage; return 2
   fi
-  local root state label probe tracked n bad="" msg="" loud=0
+  local root state label probe tracked others n m bad="" msg="" note="" loud=0
+  # The litopys pathspecs, as an array for git and as text for the command printed to the owner.
+  local -a scope=(.litopys '*/.litopys/*' docs/chronicle)
+  local shown=".litopys '*/.litopys/*' docs/chronicle"
+  if [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ]; then
+    scope=(.litopys '*/.litopys/*'); shown=".litopys '*/.litopys/*'"
+  fi
   root="$(project_root)"
   state="$(ensure_private "$root")"
   label="$(privacy_label)"
@@ -185,6 +194,7 @@ cmd_privacy() {
     failed)   echo "[litopys] PRIVACY: cannot write .gitignore - $label NOT git-ignored"; return 0 ;;
     added)    msg="added $label to .gitignore - commit it"; loud=1 ;;
     updated)  msg="rewrote the litopys block in .gitignore - commit it"; loud=1 ;;
+    symlink)  note=" (.gitignore is a symlink - checked, not rewritten)" ;;
   esac
 
   # git's own matcher is the judge: a later `!` rule or a nested .gitignore can undo the block.
@@ -197,23 +207,33 @@ cmd_privacy() {
   if [ -n "$bad" ]; then
     msg="${msg:+$msg · }NOT ignored: $bad - a later .gitignore rule overrides the litopys block"; loud=1
   fi
+  # ... and the real files: an owner rule like `!docs/chronicle/sessions/2026-*` un-ignores real
+  # records while every probe name above stays ignored.
+  others="$(git -C "$root" ls-files --others --exclude-standard -- "${scope[@]}" 2>/dev/null \
+    | grep -vx 'docs/chronicle/golden-questions.md' || true)"
+  m="$(printf '%s' "$others" | grep -c . 2>/dev/null || true)"
+  m="${m:-0}"
+  if [ "$m" -gt 0 ]; then
+    msg="${msg:+$msg · }$m litopys file(s) NOT ignored - git would add them; a .gitignore rule un-ignores them"; loud=1
+  fi
 
   # Tracked before the block existed: .gitignore cannot hide those. The command is printed,
-  # never run - untracking stages deletions on the owner's branch.
-  tracked="$(git -C "$root" ls-files -ci --exclude-standard -- .litopys docs/chronicle '*/.litopys/*' 2>/dev/null || true)"
+  # never run - untracking stages deletions on the owner's branch. It lists exactly the pathspecs
+  # the count used, so running it clears this warning.
+  tracked="$(git -C "$root" ls-files -ci --exclude-standard -- "${scope[@]}" 2>/dev/null || true)"
   n="$(printf '%s' "$tracked" | grep -c . 2>/dev/null || true)"
   n="${n:-0}"
   if [ "$n" -gt 0 ]; then
-    msg="${msg:+$msg · }$n litopys file(s) already tracked by git - untrack: git ls-files -ci --exclude-standard -z -- .litopys docs/chronicle | xargs -0 git rm --cached --quiet -- ; then commit (history already pushed stays on the remote)"
+    msg="${msg:+$msg · }$n litopys file(s) already tracked by git - untrack: git ls-files -ci --exclude-standard -z -- $shown | xargs -0 git rm --cached --quiet -- ; then commit (history already pushed stays on the remote)"
     loud=1
   fi
 
   if [ "$loud" -eq 1 ]; then
-    echo "[litopys] PRIVACY: $msg"
+    echo "[litopys] PRIVACY: $msg$note"
   elif [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ]; then
-    echo "[litopys] privacy: .litopys/ git-ignored ✓ · docs/chronicle/ tracked on purpose (LITOPYS_TRACK_CHRONICLE=1)"
+    echo "[litopys] privacy: .litopys/ git-ignored ✓ · docs/chronicle/ tracked on purpose (LITOPYS_TRACK_CHRONICLE=1)$note"
   else
-    echo "[litopys] privacy: $label git-ignored ✓"
+    echo "[litopys] privacy: $label git-ignored ✓$note"
   fi
   return 0
 }
@@ -570,15 +590,24 @@ csv_list() { # csv_list "a, b" -> "[a, b]"   (empty -> "[]")
 }
 
 json_str() { # json_str <text> - JSON string escaping without jq: backslash, quote, tab, CR and
-             # LF escaped, any other control character dropped - one row stays one line
-  local s="$1" bs='\' q='"'
-  # Replacements quoted: with bash 5.2's patsub_replacement an unquoted backslash is eaten.
-  s="${s//"$bs"/"$bs$bs"}"
-  s="${s//"$q"/"$bs$q"}"
-  s="${s//$'\t'/"${bs}t"}"
-  s="${s//$'\r'/"${bs}r"}"
-  s="${s//$'\n'/"${bs}n"}"
-  printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037'
+             # LF escaped, any other control character dropped - one row stays one line.
+  # One character at a time on purpose: `${s//pat/rep}` treats a backslash or quote in `rep`
+  # differently in bash 3.2, 4.x and 5.2 (patsub_replacement), and macOS still ships 3.2. The
+  # inputs are short (a timestamp, an id, a path, a model name).
+  local s="$1" out="" c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      \\) out="$out"'\\' ;;
+      '"') out="$out"'\"' ;;
+      $'\t') out="$out"'\t' ;;
+      $'\r') out="$out"'\r' ;;
+      $'\n') out="$out"'\n' ;;
+      [[:cntrl:]]) : ;;
+      *) out="$out$c" ;;
+    esac
+  done
+  printf '%s' "$out"
 }
 
 # The record path is built from journal frontmatter, which is data and never a path: the date
@@ -852,7 +881,9 @@ distill_next() {
       if [ -n "$(find "$lock.stale.$$" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
         rm -rf "$lock.stale.$$" 2>/dev/null || true
       else
-        mv "$lock.stale.$$" "$lock" 2>/dev/null || rm -rf "$lock.stale.$$" 2>/dev/null || true
+        # A fresh lock was moved: give it back, unless a third run has taken the name meanwhile -
+        # then leave it aside rather than nest it or delete it (it may be live).
+        [ -e "$lock" ] || mv "$lock.stale.$$" "$lock" 2>/dev/null || true
       fi
     fi
     if ! mkdir "$lock" 2>/dev/null; then
@@ -1017,10 +1048,24 @@ distill_finish() {
 
   # C17 - private by default: the records are written and git-ignored, so there is nothing to
   # commit and the manifest has done its job. Only the owner's explicit opt-in commits them.
+  # The message says only what git confirms: every path this run wrote is checked with git's
+  # own matcher before the line claims it is ignored.
   if [ "${LITOPYS_TRACK_CHRONICLE:-}" != "1" ]; then
+    local why="docs/chronicle/ is git-ignored (LITOPYS_TRACK_CHRONICLE=1 commits it)" mp
+    if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
+      why="not a git repository"
+    elif [ -f "$manifest" ]; then
+      while IFS= read -r mp || [ -n "$mp" ]; do
+        mp="${mp%$'\r'}"
+        [ -n "$mp" ] && [ -e "$root/$mp" ] || continue
+        if ! git -C "$root" check-ignore -q -- "$mp" 2>/dev/null; then
+          why="records NOT git-ignored - run bin/litopys privacy"; break
+        fi
+      done < "$manifest"
+    fi
     rm -rf "$lock" 2>/dev/null || true
     rm -f "$manifest" 2>/dev/null || true
-    printf '%s\n' "kept local: docs/chronicle/ is git-ignored (LITOPYS_TRACK_CHRONICLE=1 commits it)"
+    printf 'kept local: %s\n' "$why"
     return 0
   fi
 
@@ -1043,7 +1088,7 @@ distill_finish() {
 
   reason="$(git_block_reason "$root")"
   if [ -z "$reason" ]; then
-    errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.finish-stderr")"
+    errfile="$(mktemp 2>/dev/null || { ensure_scratch "$root"; printf '%s' "$root/.litopys/.finish-stderr"; })"
     if [ "${#paths[@]}" -eq 0 ]; then
       reason="nothing to commit"
     elif ! git -C "$root" add -- ${paths[@]+"${paths[@]}"} 2>"$errfile"; then

@@ -241,6 +241,14 @@ mkdir -p "$M"
 eq "prompt without cwd exits 0" "0" "$?"
 cat "$M/.litopys/raw/s9.md" 2>/dev/null | expect "no cwd falls back to the cwd of the process" "no cwd key"
 
+# A journal is a verbatim transcript: when .litopys/.gitignore cannot be written, none is kept.
+FC="$T/failclosed"
+mkdir -p "$FC/.litopys/.gitignore"   # a directory where the self-ignore file must go
+printf '{"session_id":"s12","cwd":"%s","user_input":"secret plans"}' "$FC" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" prompt > /dev/null 2>&1
+eq "prompt exits 0 when the self-ignore cannot be written" "0" "$?"
+no_file "no self-ignore means no journal (fail closed)" "$FC/.litopys/raw/s12.md"
+
 U="$T/unwritable"
 mkdir -p "$U"
 printf 'I am a file, not a directory\n' > "$U/.litopys"   # mkdir -p .litopys/raw must fail
@@ -263,6 +271,28 @@ printf '%s' "$out" | jq -e . > /dev/null 2>&1
 eq "the static fallback is still valid JSON" "0" "$?"
 printf '%s' "$out" | expect "no jq still runs the privacy guard" "[litopys] PRIVACY: git not found"
 printf '%s' "$out" | expect "no jq still tells the owner" '"systemMessage":"[litopys] PRIVACY'
+
+# No jq but git present: the guard writes the block and the model still gets the no-force rule.
+# Only possible where jq lives in a directory of its own (it does under winget, not in /usr/bin).
+JQDIR="$(dirname "$(command -v jq)")"
+NOJQ_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$JQDIR" | paste -sd: -)"
+if PATH="$NOJQ_PATH" command -v git > /dev/null 2>&1 && ! PATH="$NOJQ_PATH" command -v jq > /dev/null 2>&1; then
+  NG2="$T/nojq-git"
+  mkdir -p "$NG2"
+  git -C "$NG2" init -q > /dev/null 2>&1
+  out="$(cd "$NG2" && printf '{"cwd":"%s"}' "$NG2" | PATH="$NOJQ_PATH" bash "$START" 2>&1)"
+  printf '%s' "$out" | jq -e . > /dev/null 2>&1
+  eq "no jq + git: still valid JSON" "0" "$?"
+  printf '%s' "$out" | jq -r .systemMessage | expect "no jq + git: the block is added" "[litopys] PRIVACY: added .litopys/ docs/chronicle/ to .gitignore"
+  printf '%s' "$out" | jq -r .hookSpecificOutput.additionalContext | expect "no jq + git: the model gets the no-force rule" "never git add -f these paths"
+else
+  echo "  skip  no jq + git: jq shares a directory with git on this machine"
+fi
+
+# plugin_root without CLAUDE_PLUGIN_ROOT and without a slash in $0: the guard must still be found.
+ctx="$(cd "$SRC/hooks" && printf '{"cwd":"%s"}' "$B" | env -u CLAUDE_PLUGIN_ROOT bash session-start.sh \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+printf '%s\n' "$ctx" | sed -n 6p | refute "a slash-less \$0 still finds bin/litopys" "guard did not run"
 
 if [ -s "$FAILED" ]; then
   echo "hooks.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"

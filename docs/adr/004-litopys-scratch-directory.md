@@ -1,6 +1,8 @@
 # ADR-004: `.litopys/` as the plugin's self-ignoring per-project scratch directory
 
-- Status: proposed
+- Status: proposed; superseded in part by ADR-010 (v0.3.0) - the plugin now writes one managed block
+  into the host's `.gitignore`, so the invariant "no plugin code writes to a host's `.gitignore`" no
+  longer holds; the self-ignoring `.litopys/` stays as the second fence
 - Date: 2026-09-21
 - Spec: docs/specs/litopys-phase-0-1
 

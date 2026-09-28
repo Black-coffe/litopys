@@ -11,8 +11,9 @@ The owner, 2026-09-28 (brief, verbatim): «Самое главное в план
 в тех проектах, в которых он установлен, должно автоматически попадать в [.gitignore]. Он должен это
 контролировать, об этом говорить, напоминать и в каждой сессии перепроверять.»
 
-Until 0.2.1, `.litopys/` was protected only by its own `.litopys/.gitignore` (`*`), which seven of
-the twelve `.litopys/` writers did not create, and `docs/chronicle/` was git-tracked by design:
+Until 0.2.1, `.litopys/` was protected only by its own `.litopys/.gitignore` (`*`), which several
+`.litopys/` writers never created themselves (they relied on another writer having run first), and
+`docs/chronicle/` was git-tracked by design:
 `distill finish` committed every record. In a public repository that pushes summaries of private
 conversations. The redactor catches key patterns, not content.
 
@@ -41,13 +42,21 @@ conversations. The redactor catches key patterns, not content.
 The plugin now edits a file the owner owns. That is bounded by the markers and announced every time
 it happens (`[litopys] PRIVACY: added ...`), so the owner commits the change knowingly. A team that
 relied on 0.2.x committing records must set the opt-in. Records already committed by 0.2.x stay
-tracked until the owner runs the printed command, and the warning repeats until then. Recall is
-unaffected: it reads the working tree.
+tracked until the owner runs the printed command, and the warning repeats until then.
+
+Recall had to change. Claude Code's `Grep` is ripgrep, and ripgrep skips git-ignored files: with the
+block in place it finds neither month files nor session records, from the project root or from
+`docs/chronicle/` (review round 1, verified with rg 14.1.1 and the Grep tool). `agents/recall.md` and
+the skill now search stages 1-2 with `git grep --no-index --no-exclude-standard`, which reads ignored
+files (verified on git 2.55; `tests/privacy.test.sh` G11 runs that exact command against an ignored
+chronicle). `Glob` and `Read` are unaffected.
 
 ## Invariants created
 Nothing litopys generates enters git unless `LITOPYS_TRACK_CHRONICLE=1`, and `.litopys/` never does.
-The guard never writes the index. Only the managed block is ever rewritten. Every `.litopys/` writer
-goes through `ensure_scratch`.
+The guard never writes the index. Only the managed block is ever rewritten, and a symlinked
+`.gitignore` is never written through. Every `.litopys/` writer in `bin/litopys` goes through
+`ensure_scratch`; `hooks/raw-journal.sh` keeps its own fail-closed copy (hooks do not source the CLI,
+ADR-003). Recall searches `docs/chronicle/` with a command that reads ignored files.
 
 ## Revisit when
 Claude Code offers a per-plugin data directory outside the project tree for the raw journal, or a

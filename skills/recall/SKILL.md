@@ -3,7 +3,7 @@ name: recall
 description: Answers a question about this project's history from git and docs, returning an answer with refs only. Trigger with /litopys:recall <question> to search project history and answer with refs.
 context: fork
 agent: recall
-allowed-tools: Read, Grep, Glob, Bash(git log:*), Bash(git tag:*), Bash(git show:*)
+allowed-tools: Read, Grep, Glob, Bash(git grep:*), Bash(git log:*), Bash(git tag:*), Bash(git show:*)
 ---
 
 # `/litopys:recall`
@@ -26,6 +26,10 @@ Search in this fixed order, stopping once you can answer confidently:
 7. `git tag` - version/release markers
 8. `git log --oneline` - commit history, drilling down with `git show <sha>` or
    `git log -S"<term>"` when a candidate commit needs confirming
+
+`docs/chronicle/` is git-ignored by default, and `Grep` skips ignored files. Search stages 1-2
+with `git grep --no-index --no-exclude-standard -n -i -e '<term>' -- docs/chronicle`, list them
+with `Glob`, read them with `Read`.
 
 ## Return
 

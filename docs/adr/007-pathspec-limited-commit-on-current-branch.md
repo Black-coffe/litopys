@@ -1,6 +1,7 @@
 # ADR-007: Session records commit pathspec-limited on the current branch, not a chronicle branch
 
-- Status: proposed
+- Status: proposed; amended by ADR-010 (v0.3.0) - this commit now runs only under the owner's
+  `LITOPYS_TRACK_CHRONICLE=1`; by default `distill finish` keeps records local
 - Date: 2026-09-21
 - Spec: docs/specs/litopys-phase-2-distill
 
