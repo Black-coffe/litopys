@@ -57,6 +57,9 @@ The guard never writes the index. Only the managed block is ever rewritten, and 
 `.gitignore` is never written through. Every `.litopys/` writer in `bin/litopys` goes through
 `ensure_scratch`; `hooks/raw-journal.sh` keeps its own fail-closed copy (hooks do not source the CLI,
 ADR-003). Recall searches `docs/chronicle/` with a command that reads ignored files.
+The printed untrack command is `git ls-files -ci ... | xargs -0 git rm --cached` over exactly the
+counted pathspecs, never `git rm -r --cached` on a directory: that keeps `golden-questions.md`
+tracked (amendment, proposed - plan delta 3 of 2026-09-29, review minor 13; owner to accept).
 
 ## Revisit when
 Claude Code offers a per-plugin data directory outside the project tree for the raw journal, or a
