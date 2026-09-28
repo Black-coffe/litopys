@@ -69,6 +69,19 @@ block. Then the recon's micro-defects, docs, and the 0.3.0 release.
   03 ships that block as part of the release (`.gitignore` added to its `## Files`), so the owner's
   next session starts on the quiet ok line instead of an uncommitted change. Rejected: leaving it to
   the next session - a dirty tree right after a release.
+- 2026-09-29, review round 1 (RED: critical 1, major 2): repair story 04 also takes the round's
+  minors 3-14 at the Queen's call - they are defects of this same diff, cheaper to fix now than to
+  ship. Story 04's `## Files` grows by `skills/recall/SKILL.md` (recall needs `Bash(git grep:*)`),
+  `docs/adr/004-litopys-scratch-directory.md` and `docs/adr/007-pathspec-limited-commit-on-current-branch.md`
+  (pointers to ADR-010), and `docs/specs/litopys-privacy-guard/recon/write-paths.md` (the recon list
+  Ask 3 is judged against, written by the Queen from the scout's report). Rejected: a second spec for
+  the minors.
+- 2026-09-29, contract drift recorded (review minor 13): the block marker reads `# >>> litopys -
+  private session data, kept out of git by the litopys plugin >>>` (matched by the `# >>> litopys`
+  prefix), not "(managed)"; `privacy <arg>` is an argument error like every other verb (exit 2 +
+  usage) - the one-line/exit-0 contract holds for the verb itself; the untrack command is the
+  `git ls-files -ci ... | xargs -0 git rm --cached` pipeline over exactly the counted pathspecs, not
+  `git rm -r --cached` - it keeps `golden-questions.md` tracked.
 
 **Approved:** <owner, date - stage 02, the unconditional gate. /vulyk-build refuses without this line.>
 **Briefed:** via grill, Andrei, 2026-09-28
