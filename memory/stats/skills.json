@@ -12,12 +12,12 @@
     "last_used": "2026-09-14"
   },
   "vulyk-plan": {
-    "count": 4,
-    "last_used": "2026-09-21"
+    "count": 5,
+    "last_used": "2026-09-28"
   },
   "vulyk-ship": {
-    "count": 4,
-    "last_used": "2026-09-21"
+    "count": 5,
+    "last_used": "2026-09-29"
   },
   "fact-check": {
     "count": 1,
@@ -26,5 +26,9 @@
   "supergrill": {
     "count": 1,
     "last_used": "2026-09-21"
+  },
+  "vulyk-update": {
+    "count": 1,
+    "last_used": "2026-09-28"
   }
 }
