@@ -1,3 +1,9 @@
 # Journal: litopys-privacy-guard
 
 - 2026-09-28T21:03:36Z · 02-approved · briefed via grill, Andrei · next: branch
+- 2026-09-28T21:03:41Z · 03-building · branch vulyk/litopys-privacy-guard created · next: build:1
+- 2026-09-28T21:34:25Z · 04-council:open · round 1 opened, no court (no blind seat required) · next: dispatch:review
+- 2026-09-28T21:50:13Z · 04-council:RED · round 1 verdict RED at 5c2ba90 pack c9387cdbcdf8 · next: repair
+- 2026-09-28T21:50:15Z · 03-building · repair round 1: litopys-privacy-guard-04-repair-round-1.md · next: build:4
+- 2026-09-28T22:07:06Z · 04-council:open · round 2 opened, no court (no blind seat required) · next: dispatch:review
+- 2026-09-28T22:10:07Z · 04-council:GREEN · round 2 verdict GREEN at 1ac8128 pack 66f8fcaae22c · next: green

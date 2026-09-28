@@ -169,6 +169,7 @@ B="$T/banner"
 mkdir -p "$B/docs/chronicle"
 printf '# Chronicle 2026-08\n\n- 2026-08-03T10:00:00Z · note · a.md · older\n' > "$B/docs/chronicle/2026-08.md"
 printf '# Chronicle 2026-09\n\n- 2026-09-21T12:34:56Z · ship · v0.1.0 · newest\n' > "$B/docs/chronicle/2026-09.md"
+printf '## Q1 · owner-written, not a chronicle month\n' > "$B/docs/chronicle/golden-questions.md"
 mkdir -p "$B/.litopys/raw/done"
 printf 'x\n' > "$B/.litopys/raw/a.md"; printf 'x\n' > "$B/.litopys/raw/b.md"
 printf 'x\n' > "$B/.litopys/raw/done/c.md"
@@ -179,13 +180,34 @@ printf '%s' "$out" | jq -e . > /dev/null 2>&1
 eq "banner is valid JSON" "0" "$?"
 eq "hookEventName" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
 ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
-eq "banner is exactly 5 lines" "5" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
+eq "banner is exactly 6 lines" "6" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
 eq "every banner line is tagged" "0" "$(printf '%s\n' "$ctx" | grep -cv '^\[litopys\] ')"
-printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.2.1 · project chronicle"
+printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.3.0 · project chronicle"
 printf '%s\n' "$ctx" | expect "line 2: chronicle count" "[litopys] chronicle: docs/chronicle/ (2 files)"
 printf '%s\n' "$ctx" | expect "line 3: last entry date" "[litopys] last entry: 2026-09-21"
 printf '%s\n' "$ctx" | expect "line 4: distill pending count (top-level only)" "[litopys] distill: 2 pending · run /litopys:distill"
 printf '%s\n' "$ctx" | expect "line 5: recall" "[litopys] recall: /litopys:recall <question>"
+printf '%s\n' "$ctx" | sed -n 6p | expect "line 6: privacy, no repo" "[litopys] privacy: not a git repository - nothing to guard"
+eq "systemMessage = the privacy line" "[litopys] privacy: not a git repository - nothing to guard" \
+  "$(printf '%s' "$out" | jq -r '.systemMessage')"
+no_file "no repo -> no .gitignore written" "$B/.gitignore"
+
+# --- C17: the privacy guard runs every session and tells both the owner and the model ----------
+GB="$T/banner-git"
+mkdir -p "$GB"
+git -C "$GB" init -q > /dev/null 2>&1 || git init -q "$GB" > /dev/null 2>&1
+out="$(printf '{"cwd":"%s","source":"startup"}' "$GB" | bash "$START" 2>/dev/null)"
+printf '%s' "$out" | jq -e . > /dev/null 2>&1
+eq "git banner is valid JSON" "0" "$?"
+msg="$(printf '%s' "$out" | jq -r '.systemMessage')"
+printf '%s' "$msg" | expect "first session adds the block, loudly" "[litopys] PRIVACY: added .litopys/ docs/chronicle/ to .gitignore"
+grep -qF '# >>> litopys' "$GB/.gitignore"
+eq "the block landed in the project's .gitignore" "0" "$?"
+ctx="$(printf '{"cwd":"%s"}' "$GB" | bash "$START" | jq -r '.hookSpecificOutput.additionalContext')"
+eq "second session: still 6 lines" "6" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
+printf '%s\n' "$ctx" | sed -n 6p | expect "second session: all good" "[litopys] privacy: .litopys/ docs/chronicle/ git-ignored ✓"
+printf '%s\n' "$ctx" | sed -n 6p | expect "the model is told never to force-add" "never git add -f these paths"
+eq "block written once" "1" "$(grep -c '^# >>> litopys' "$GB/.gitignore")"
 
 E="$T/empty-project"
 mkdir -p "$E"
@@ -204,9 +226,11 @@ for mode in prompt stop end compact; do
   printf '[1,2]' | bash "$RAW" "$mode" > /dev/null 2>&1
   eq "$mode survives a non-object payload" "0" "$?"
 done
-printf 'not json at all' | bash "$START" > /dev/null 2>&1
+# No cwd in the payload -> the banner falls back to the process's own directory, and the privacy
+# guard writes there: run these from a throwaway dir, never from this repository.
+( cd "$T" && printf 'not json at all' | bash "$START" > /dev/null 2>&1 )
 eq "banner survives malformed stdin" "0" "$?"
-printf '' | bash "$START" > "$T/out3" 2>&1
+( cd "$T" && printf '' | bash "$START" > "$T/out3" 2>&1 )
 eq "banner survives empty stdin" "0" "$?"
 jq -e . "$T/out3" > /dev/null 2>&1
 eq "banner on empty stdin is still valid JSON" "0" "$?"
@@ -216,6 +240,14 @@ mkdir -p "$M"
 ( cd "$M" && printf '{"session_id":"s9","user_input":"no cwd key"}' | LITOPYS_NOW="$NOW" bash "$RAW" prompt )
 eq "prompt without cwd exits 0" "0" "$?"
 cat "$M/.litopys/raw/s9.md" 2>/dev/null | expect "no cwd falls back to the cwd of the process" "no cwd key"
+
+# A journal is a verbatim transcript: when .litopys/.gitignore cannot be written, none is kept.
+FC="$T/failclosed"
+mkdir -p "$FC/.litopys/.gitignore"   # a directory where the self-ignore file must go
+printf '{"session_id":"s12","cwd":"%s","user_input":"secret plans"}' "$FC" \
+  | LITOPYS_NOW="$NOW" bash "$RAW" prompt > /dev/null 2>&1
+eq "prompt exits 0 when the self-ignore cannot be written" "0" "$?"
+no_file "no self-ignore means no journal (fail closed)" "$FC/.litopys/raw/s12.md"
 
 U="$T/unwritable"
 mkdir -p "$U"
@@ -237,6 +269,30 @@ eq "session-start exits 0 without jq" "0" "$?"
 printf '%s' "$out" | expect "no jq gives the static C9 line" "[litopys] jq not found - raw journal disabled"
 printf '%s' "$out" | jq -e . > /dev/null 2>&1
 eq "the static fallback is still valid JSON" "0" "$?"
+printf '%s' "$out" | expect "no jq still runs the privacy guard" "[litopys] PRIVACY: git not found"
+printf '%s' "$out" | expect "no jq still tells the owner" '"systemMessage":"[litopys] PRIVACY'
+
+# No jq but git present: the guard writes the block and the model still gets the no-force rule.
+# Only possible where jq lives in a directory of its own (it does under winget, not in /usr/bin).
+JQDIR="$(dirname "$(command -v jq)")"
+NOJQ_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$JQDIR" | paste -sd: -)"
+if PATH="$NOJQ_PATH" command -v git > /dev/null 2>&1 && ! PATH="$NOJQ_PATH" command -v jq > /dev/null 2>&1; then
+  NG2="$T/nojq-git"
+  mkdir -p "$NG2"
+  git -C "$NG2" init -q > /dev/null 2>&1
+  out="$(cd "$NG2" && printf '{"cwd":"%s"}' "$NG2" | PATH="$NOJQ_PATH" bash "$START" 2>&1)"
+  printf '%s' "$out" | jq -e . > /dev/null 2>&1
+  eq "no jq + git: still valid JSON" "0" "$?"
+  printf '%s' "$out" | jq -r .systemMessage | expect "no jq + git: the block is added" "[litopys] PRIVACY: added .litopys/ docs/chronicle/ to .gitignore"
+  printf '%s' "$out" | jq -r .hookSpecificOutput.additionalContext | expect "no jq + git: the model gets the no-force rule" "never git add -f these paths"
+else
+  echo "  skip  no jq + git: jq shares a directory with git on this machine"
+fi
+
+# plugin_root without CLAUDE_PLUGIN_ROOT and without a slash in $0: the guard must still be found.
+ctx="$(cd "$SRC/hooks" && printf '{"cwd":"%s"}' "$B" | env -u CLAUDE_PLUGIN_ROOT bash session-start.sh \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+printf '%s\n' "$ctx" | sed -n 6p | refute "a slash-less \$0 still finds bin/litopys" "guard did not run"
 
 if [ -s "$FAILED" ]; then
   echo "hooks.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"

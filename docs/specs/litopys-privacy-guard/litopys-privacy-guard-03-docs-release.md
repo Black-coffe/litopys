@@ -1,8 +1,8 @@
 ---
 story: litopys-privacy-guard-03
 spec: litopys-privacy-guard
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: sonnet
@@ -40,6 +40,7 @@ every literal, with a CHANGELOG entry that doubles as the GitHub Release body.
 - skills/distill/.gitkeep
 - examples/vulyk/.gitkeep
 - tests/fixtures/.gitkeep
+- .gitignore
 
 ## Non-goals
 - No push, tag, GitHub Release or `gh repo edit` here - that is `/vulyk-ship` after GREEN.
@@ -63,5 +64,9 @@ memory/map/litopys-plugin.md - Purpose, Hooks.
 for t in tests/*.test.sh; do bash "$t" || exit 1; done
 
 ## Implementation notes
+- README rewritten around the four features plus a "Privacy: private by default" section (the block verbatim, the per-session line, loud cases, kept local, the opt-in); install commands unchanged.
+- plugin.json / marketplace.json descriptions and keywords; ADR-010 (supersedes ADR-004's invariant, amends ADR-007); wiki notes say git-ignored by default and describe the stricter `distill record` redaction.
+- 0.3.0 in plugin.json, `bin/litopys`, the session-start fallback and the three test literals; CHANGELOG `## [0.3.0]` = the GitHub Release body.
+- Six `.gitkeep` files removed; this repo's `.gitignore` carries the litopys block (plan delta 2026-09-29), written by `bin/litopys privacy` itself.
 
 ## Findings

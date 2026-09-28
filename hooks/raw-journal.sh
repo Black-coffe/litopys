@@ -64,10 +64,12 @@ journal_compact() { # PreCompact: one append, only into a journal that already e
 }
 
 ensure_journal() { # create the C8 frontmatter on the first block of the session
-  [ -f "$file" ] && return 0
+  # C1 - .litopys/ ignores itself (the host's .gitignore block is the second fence, C17). A
+  # journal is a verbatim transcript: when the self-ignore cannot be written, nothing is
+  # journalled (fail closed), and the check runs on every block, not only the first.
   mkdir -p "$root/.litopys/raw" 2>/dev/null || return 1
-  # C1 - .litopys/ ignores itself, so no host project's .gitignore is ever touched.
-  [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore" 2>/dev/null
+  [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore" 2>/dev/null || return 1
+  [ -f "$file" ] && return 0
   local branch gdir
   gdir="${cwd:-$root}"
   # symbolic-ref first: on a branch with no commits yet, rev-parse --abbrev-ref prints "HEAD".

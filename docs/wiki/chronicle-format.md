@@ -42,18 +42,21 @@ Line shape:
 `<project-root>/scripts/redact.sh` wins first (its patterns are the ones its owner maintains),
 then the plugin's shipped `${CLAUDE_PLUGIN_ROOT}/scripts/redact.sh`, then the copy next to
 `bin/litopys` itself (`<bin dir>/../scripts/redact.sh`, for when `CLAUDE_PLUGIN_ROOT` is unset);
-none of the three present falls back to a plain passthrough (`cat`). Redaction is always
-best-effort and never a gate: if the chosen filter fails, the record falls back to the
-unredacted text rather than being dropped. The plugin's `scripts/redact.sh` is VULYK's own copy,
+none of the three present falls back to a plain passthrough (`cat`). For `append`,
+redaction is best-effort and never a gate: if the filter fails, the line keeps the unfiltered
+text rather than being dropped. `distill record` is stricter (v0.3.0): a filter that fails or
+prints nothing refuses the record (exit 2) instead of writing it unfiltered. The plugin's `scripts/redact.sh` is VULYK's own copy,
 verbatim, with only the caller names in the header changed. Hooks (`hooks/raw-journal.sh`)
-never redact - raw journals stay outside git untouched by any filter; redaction only happens on
-the git-bound path (`append`, `distill record`).
+never redact - raw journals stay outside git untouched by any filter; redaction happens on the
+paths that can reach git under `LITOPYS_TRACK_CHRONICLE=1` (`append`, `distill record`).
 
 ## C8 - raw journal file (`hooks/raw-journal.sh`)
 
 File: `<project-root>/.litopys/raw/<session_id>.md`, one file per Claude Code session (the
 session id is sanitized to `[A-Za-z0-9._-]` before use as a filename). `.litopys/` carries its
-own `.gitignore` (`*`) so no host project's own `.gitignore` needs an entry.
+own `.gitignore` (`*`), and since v0.3.0 the host's `.gitignore` also carries the litopys block
+that lists `.litopys/` (ADR-010) - two fences. The journal is not written when the self-ignore
+cannot be.
 
 Frontmatter, written once on the first hook call of a session (`ensure_journal`):
 ```

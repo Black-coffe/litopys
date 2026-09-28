@@ -7,7 +7,8 @@ last-verified: 2026-09-21
 
 # C11 session record (`bin/litopys distill record`)
 
-The git-tracked, distilled counterpart to a raw journal (see `docs/wiki/chronicle-format.md`
+The distilled counterpart to a raw journal - git-ignored by default, committed only under
+`LITOPYS_TRACK_CHRONICLE=1` (ADR-010) (see `docs/wiki/chronicle-format.md`
 C8/C13 for the raw journal it is built from). Written only by `distill_record()` in
 `bin/litopys` (spec `litopys-phase-2-distill`, v0.2.0) - never by a hook, never directly by the
 `distiller` agent.
@@ -66,11 +67,11 @@ model: <name>                    # --model, default sonnet
 ## Side effects of one `distill record` call
 
 In order, once the journal and body both validate:
-1. The record file is written (redacted).
+1. The record file is written (redacted; a filter that fails or prints nothing refuses the call, exit 2).
 2. One `session`-kind chronicle line is appended to the monthly file via `cmd_append` itself
    (`--ref <rel> --note <title>`) - the monthly file keeps one writer.
 3. `<rel>` and the month's chronicle path are appended to `.litopys/distill.paths` (the run
-   manifest `distill finish` later commits from).
+   manifest `distill finish` commits from under `LITOPYS_TRACK_CHRONICLE=1`, and clears otherwise).
 4. The source journal is moved to `.litopys/raw/done/<sidsafe>.md` (gitignored, kept indefinitely,
    re-distillable with `--force`).
 5. One row is appended to `.litopys/distill.jsonl`: `{ts, session_id, record, journal_bytes,

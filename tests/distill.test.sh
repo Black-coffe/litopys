@@ -226,6 +226,46 @@ LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$M/nope.md" --body "$FI
 eq "missing journal exits 2" "2" "$?"
 no_file "missing journal writes nothing" "$M/docs"
 
+# --- P6: a redactor that fails is never a passthrough -------------------------------------------
+X="$T/p6-badfilter"
+mkdir -p "$X/scripts" "$X/.litopys/raw"
+printf 'exit 1\n' > "$X/scripts/redact.sh"
+mkjournal "$X/.litopys/raw/$SID.md" "$SID" "2026-09-20T10:00:00Z" "do work" closed
+err="$(CLAUDE_PROJECT_DIR="$X" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+  --journal "$X/.litopys/raw/$SID.md" --body "$FIX/distill-body.md" 2>&1 >/dev/null)"
+eq "P6 failing redactor exits 2" "2" "$?"
+printf '%s' "$err" | expect "P6 says the redactor failed" "the redactor"
+no_file "P6 no unfiltered record written" "$X/$REL"
+[ -f "$X/.litopys/raw/$SID.md" ]
+eq "P6 journal stays in the queue" "0" "$?"
+
+# --- P7: journal frontmatter is data, never a path --------------------------------------------
+Y="$T/p7-evil"
+mkdir -p "$Y/.litopys/raw"
+mkjournal "$Y/.litopys/raw/evil.md" "../../x/../y" "../../../etc" "do work" closed
+out="$(CLAUDE_PROJECT_DIR="$Y" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+  --journal "$Y/.litopys/raw/evil.md" --body "$FIX/distill-body.md" --model $'son\tnet\\x' 2>/dev/null)"
+eq "P7 a hostile id and date still give one sanitised record path" \
+  "docs/chronicle/sessions/2026-09-21-______x_.md" "$out"
+[ -f "$Y/$out" ]
+eq "P7 the record is inside docs/chronicle/sessions/" "0" "$?"
+no_file "P7 nothing climbed out of the project" "$T/x"
+tail -n 1 "$Y/.litopys/distill.jsonl" | jq -e . > /dev/null 2>&1
+eq "P7 distill.jsonl row with a tab and a backslash is still valid JSON" "0" "$?"
+eq "P7 the model survives the round trip" $'son\tnet\\x' "$(tail -n 1 "$Y/.litopys/distill.jsonl" | jq -r .model)"
+
+# --- P8: json_str is valid JSON on every bash from 3.2 (stock macOS) up ------------------------
+# The input travels in a file: Cygwin drops a CR handed to a child bash in argv under BASH_COMPAT.
+{ sed -n '/^json_str() {/,/^}/p' "$CLI"
+  printf '%s\n' 'v="$(cat "$1")"' "printf '{\"m\":\"%s\"}' \"\$(json_str \"\$v\")\""; } > "$T/js.sh"
+printf 'a\\b"c\td\re\nf' > "$T/js.in"
+for compat in 32 42 51 52; do
+  out="$(BASH_COMPAT="$compat" bash "$T/js.sh" "$T/js.in")"
+  # compared as jq's own JSON rendering: a native jq on Windows writes CRLF on `-r`
+  eq "P8 json_str round-trips under BASH_COMPAT=$compat" '"a\\b\"c\td\re\nf"' \
+    "$(printf '%s' "$out" | jq -c .m 2>/dev/null | tr -d '\r')"
+done
+
 # --- P5: the verb itself ---------------------------------------------------------------------
 err="$(bash "$CLI" distill 2>&1 >/dev/null)"
 eq "distill with no verb exits 2" "2" "$?"
@@ -309,7 +349,7 @@ else bad "N3 open-session journal moved"; fi
 if [ -f "$Q4/.litopys/raw/running.md" ]; then echo "  ok    N3 live /litopys:distill journal left at the top level"
 else bad "N3 the running distill journal was moved mid-session"; fi
 rm -rf "$Q4/.litopys/distill.lock"
-touch -d '61 minutes ago' "$Q4/.litopys/raw/running.md"
+touch -t 202001010000 "$Q4/.litopys/raw/running.md"   # POSIX touch -t: long past 60 minutes
 out2="$(bash "$CLI" distill next 2>"$T/n4b.err")"
 eq "N3 aged /litopys:distill journal is skipped, never printed" "" "$out2"
 eq "N3 aged distill journal stderr: skipped 1 pending 1 selected 0" \
@@ -317,7 +357,7 @@ eq "N3 aged distill journal stderr: skipped 1 pending 1 selected 0" \
 if [ -f "$Q4/.litopys/raw/skipped/running.md" ]; then echo "  ok    N3 aged distill journal moved to skipped/"
 else bad "N3 aged distill journal not in skipped/"; fi
 rm -rf "$Q4/.litopys/distill.lock"
-touch -d '61 minutes ago' "$Q4/.litopys/raw/open.md"
+touch -t 202001010000 "$Q4/.litopys/raw/open.md"
 out3="$(bash "$CLI" distill next 2>/dev/null)"
 printf '%s' "$out3" | expect "N3 open session printed once its mtime ages past 60 minutes" "open.md"
 
@@ -416,9 +456,38 @@ eq "N7 second run stdout empty" "" "$out2"
 eq "N7 second run stderr is locked" "locked" "$(cat "$T/n8.err")"
 if [ -f "$Q9/.litopys/raw/lk.md" ]; then echo "  ok    N7 locked run moved no file"
 else bad "N7 locked run moved the journal"; fi
-touch -d '31 minutes ago' "$Q9/.litopys/distill.lock"
+touch -t 202001010000 "$Q9/.litopys/distill.lock"   # long past the 30-minute reclaim
 out3="$(bash "$CLI" distill next 2>/dev/null)"
 eq "N7 stale lock reclaimed, run proceeds" "$Q9/.litopys/raw/lk.md" "$out3"
+
+# N7b: a reclaimer that moved a lock which turns out to be fresh gives it back, whole. A `find`
+# shim reports the lock stale on the first look and fresh on the re-check - the race, made
+# deterministic.
+QL="$T/n7b-moveback"
+mkdir -p "$QL/.litopys/distill.lock" "$T/shim"
+printf 'holder\n' > "$QL/.litopys/distill.lock/owner"
+cat > "$T/shim/find" <<'SHIM'
+#!/usr/bin/env bash
+n="$(cat "$FIND_COUNT" 2>/dev/null || echo 0)"; n=$((n + 1)); echo "$n" > "$FIND_COUNT"
+[ "$n" -eq 1 ] && printf '%s\n' "$1"
+exit 0
+SHIM
+chmod +x "$T/shim/find"
+FIND_COUNT="$T/find.count" PATH="$T/shim:$PATH" CLAUDE_PROJECT_DIR="$QL" \
+  bash "$CLI" distill next > /dev/null 2>&1
+eq "N7b a fresh lock moved by mistake still means locked" "3" "$?"
+eq "N7b the holder's lock is back, whole" "holder" "$(cat "$QL/.litopys/distill.lock/owner" 2>/dev/null)"
+eq "N7b nothing left aside" "" "$(ls -d "$QL"/.litopys/distill.lock.stale.* 2>/dev/null)"
+
+# N7c: journals without a `started` sort by file mtime (`date -r`), oldest first.
+QM="$T/n7c-mtime"
+mkdir -p "$QM/.litopys/raw"
+mkjournal "$QM/.litopys/raw/a-newer.md" "n7cnewer-1111" "" "do work" closed
+mkjournal "$QM/.litopys/raw/z-older.md" "n7colder-1111" "" "do work" closed
+touch -t 202001010000 "$QM/.litopys/raw/a-newer.md"
+touch -t 201901010000 "$QM/.litopys/raw/z-older.md"
+out="$(CLAUDE_PROJECT_DIR="$QM" bash "$CLI" distill next 2>/dev/null | head -n 1)"
+eq "N7c the older mtime comes first" "$QM/.litopys/raw/z-older.md" "$out"
 
 # N8: idempotence with record - once record moves a printed journal to done/, next stops
 # listing it.
@@ -467,6 +536,44 @@ outside_chronicle() { # outside_chronicle <root> - paths in HEAD that are not un
   done < <(git -C "$r" show --pretty=format: --name-only HEAD)
   printf '%s' "$out"
 }
+
+# F0 (C17): private by default - `distill record` wrote the litopys block into .gitignore, and
+# `finish` commits nothing, stages nothing, releases the lock and clears the manifest.
+R0="$(newrepo f0-private)"
+put_record "$R0" "f0aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+mkdir -p "$R0/.litopys/distill.lock"
+out="$(CLAUDE_PROJECT_DIR="$R0" bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F0 distill finish exits 0" "0" "$rc"
+case "$out" in
+  "kept local: "*) echo "  ok    F0 private by default: kept local" ;;
+  *) bad "F0 expected 'kept local: ...', got '$out'" ;;
+esac
+eq "F0 no commit" "1" "$(git -C "$R0" rev-list --count HEAD)"
+eq "F0 nothing staged" "" "$(git -C "$R0" diff --cached --name-only)"
+no_file "F0 lock released" "$R0/.litopys/distill.lock"
+no_file "F0 manifest cleared" "$R0/.litopys/distill.paths"
+[ -f "$R0/docs/chronicle/sessions/2026-09-18-f0aaaaaa.md" ]
+eq "F0 the record is on disk" "0" "$?"
+git -C "$R0" check-ignore -q -- "docs/chronicle/sessions/2026-09-18-f0aaaaaa.md"
+eq "F0 the record is git-ignored" "0" "$?"
+eq "F0 git sees only the new .gitignore" "?? .gitignore" "$(git -C "$R0" status --porcelain)"
+
+# F0b/F0c: `kept local` says only what git confirms.
+R0b="$(newrepo f0b-overridden)"
+put_record "$R0b" "f0bbbbbb-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+printf '!docs/chronicle/sessions/\n' >> "$R0b/.gitignore"
+CLAUDE_PROJECT_DIR="$R0b" bash "$CLI" distill finish 2>/dev/null \
+  | expect "F0b an overridden block is not reported as ignored" "kept local: records NOT git-ignored"
+N0c="$T/f0c-nogit"
+mkdir -p "$N0c/.litopys/raw"
+mkjournal "$N0c/.litopys/raw/f0c.md" "f0cccccc-1111" "2026-09-18T08:00:00Z" "do work" closed
+CLAUDE_PROJECT_DIR="$N0c" LITOPYS_NOW="$NOW" bash "$CLI" distill record \
+  --journal "$N0c/.litopys/raw/f0c.md" --body "$FIX/distill-body.md" > /dev/null 2>&1
+CLAUDE_PROJECT_DIR="$N0c" bash "$CLI" distill finish 2>/dev/null \
+  | expect "F0c outside git it says so" "kept local: not a git repository"
+
+# F1-F13 run with the owner's opt-in: the ADR-007 commit contract, unchanged.
+export LITOPYS_TRACK_CHRONICLE=1
 
 # F1: the happy path - only docs/chronicle/ is committed, the host's index is left alone.
 R1="$(newrepo f1-happy)"

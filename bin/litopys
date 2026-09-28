@@ -4,7 +4,7 @@
 #   Usage: bash bin/litopys append --kind <kind> --ref <path> [--note "<text>"]
 #          bash bin/litopys distill record --journal <raw.md> --body <body.md|->
 #          bash bin/litopys distill next | distill finish
-#          bash bin/litopys bench
+#          bash bin/litopys bench | privacy
 #          bash bin/litopys --version | help
 #
 # Invoked as `bash "${CLAUDE_PLUGIN_ROOT}/bin/litopys" <sub>` (C2) so Windows never
@@ -15,7 +15,7 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.2.1"
+VERSION="0.3.0"
 KINDS="grill brief verdict ship handoff note session"
 
 usage() {
@@ -32,10 +32,14 @@ litopys $VERSION
       already-distilled journals in .litopys/raw/skipped/, print up to N (default 3) eligible
       journal paths oldest first. A journal whose session may still be running is never moved.
   litopys distill finish
-      Commit only the paths this run wrote (.litopys/distill.paths) on the current branch,
-      never the host's other staged or unstaged work, and release the distill lock.
-      Prints 'committed <sha7>' or
-      'uncommitted: <reason>'; always exit 0.
+      Release the distill lock. Records stay local ('kept local: ...') unless
+      LITOPYS_TRACK_CHRONICLE=1, which commits only the paths this run wrote
+      (.litopys/distill.paths) on the current branch, never the host's other staged or unstaged
+      work, and prints 'committed <sha7>' or 'uncommitted: <reason>'. Always exit 0.
+  litopys privacy
+      Make <root>/.gitignore carry the litopys block (.litopys/ and docs/chronicle/*), verify it
+      with git, and print one status line; warns about litopys files git already tracks and
+      never touches the index. The SessionStart hook runs this every session.
   litopys bench
       Ask every question in <root>/docs/chronicle/golden-questions.md through
       /litopys:recall and append one JSON row per question to <root>/.litopys/baseline.jsonl.
@@ -46,7 +50,8 @@ litopys $VERSION
   litopys help            This text.
 
 Environment: CLAUDE_PROJECT_DIR (project root override), LITOPYS_NOW (UTC ISO clock override),
-LITOPYS_CLAUDE (claude binary used by bench), CLAUDE_PLUGIN_ROOT (this plugin's root).
+LITOPYS_CLAUDE (claude binary used by bench), CLAUDE_PLUGIN_ROOT (this plugin's root),
+LITOPYS_TRACK_CHRONICLE=1 (commit docs/chronicle/ instead of git-ignoring it).
 EOF
 }
 
@@ -82,6 +87,155 @@ redactor() { # redactor [root] - print a filter path, or the literal `cat`
 
 redact_filter() { # redact_filter <redactor-path> - stdin -> stdout, `cat` when there is none
   if [ "$1" = "cat" ]; then cat; else bash "$1"; fi
+}
+
+# C1 - every writer of .litopys/ comes through here, so the self-ignore cannot be forgotten by
+# the next writer someone adds. Non-zero when the directory or its .gitignore cannot be written.
+ensure_scratch() { # ensure_scratch <root>
+  mkdir -p "$1/.litopys" 2>/dev/null || return 1
+  [ -f "$1/.litopys/.gitignore" ] || printf '*\n' > "$1/.litopys/.gitignore" 2>/dev/null || return 1
+}
+
+# --- privacy guard (C17) --------------------------------------------------------------------
+# Everything litopys generates in a host stays out of git by default: raw journals are full
+# transcripts, and a distilled record is still a summary of a private conversation that the
+# redactor's key patterns cannot judge. The host's own <root>/.gitignore carries one managed
+# block; only that block is ever rewritten, and only when its content differs from what the
+# current mode wants. LITOPYS_TRACK_CHRONICLE=1 is the explicit opt-in that lets a team commit
+# docs/chronicle/ again (the ADR-007 commit in `distill finish`); .litopys/ is private always.
+# `.litopys/` is unanchored so a nested sub/.litopys/ is covered too; golden-questions.md is
+# written by the owner, not generated, so it stays trackable.
+PRIVACY_BEGIN='# >>> litopys - private session data, kept out of git by the litopys plugin >>>'
+PRIVACY_END='# <<< litopys <<<'
+
+privacy_block() { # the managed block for the current mode, marker lines included
+  printf '%s\n' "$PRIVACY_BEGIN" \
+    '# rewritten every session; to commit the chronicle set LITOPYS_TRACK_CHRONICLE=1' \
+    '.litopys/'
+  if [ "${LITOPYS_TRACK_CHRONICLE:-}" != "1" ]; then
+    printf '%s\n' 'docs/chronicle/*' '!docs/chronicle/golden-questions.md'
+  fi
+  printf '%s\n' "$PRIVACY_END"
+}
+
+privacy_label() { # the protected paths, for humans
+  if [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ]; then printf '.litopys/'; else printf '.litopys/ docs/chronicle/'; fi
+}
+
+# Markers match by prefix, so a later version's reworded marker still finds an older block. The
+# block is the last begin marker before the first end marker; a begin with no end after it is
+# never a block, so a half-deleted block cannot swallow the rest of the owner's file.
+ensure_private() { # ensure_private <root> - prints ok|added|updated|symlink|nogit|nogitbin|failed
+  local root="$1" gi want have tmp
+  if ! command -v git > /dev/null 2>&1; then printf 'nogitbin\n'; return 0; fi
+  if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
+    printf 'nogit\n'; return 0
+  fi
+  gi="$root/.gitignore"
+  # A symlinked .gitignore is the owner's own arrangement (or a trap in an untrusted checkout):
+  # never written through, never replaced. cmd_privacy's git checks still judge the result.
+  if [ -L "$gi" ]; then printf 'symlink\n'; return 0; fi
+  want="$(privacy_block)"
+  if [ ! -f "$gi" ]; then
+    if printf '%s\n' "$want" > "$gi" 2>/dev/null; then printf 'added\n'; else printf 'failed\n'; fi
+    return 0
+  fi
+  have="$(awk '{ l = $0; sub(/\r$/, "", l) }
+    e { next }
+    index(l, "# >>> litopys") == 1 { buf = l; b = 1; next }
+    b { buf = buf "\n" l }
+    b && index(l, "# <<< litopys") == 1 { e = 1 }
+    END { if (e) print buf }' "$gi" 2>/dev/null)"
+  [ "$have" = "$want" ] && { printf 'ok\n'; return 0; }
+  tmp="$gi.litopys.$$"
+  if LITOPYS_BLOCK="$want" awk '
+      NR == FNR { l = $0; sub(/\r$/, "", l)
+                  if (!e && index(l, "# >>> litopys") == 1) b = FNR
+                  else if (b && !e && index(l, "# <<< litopys") == 1) e = FNR
+                  next }
+      b && e && FNR >= b && FNR <= e { if (FNR == b) print ENVIRON["LITOPYS_BLOCK"]; next }
+      { print; last = $0 }
+      END { if (!(b && e)) { sub(/\r$/, "", last); if (last != "") print ""; print ENVIRON["LITOPYS_BLOCK"] } }
+    ' "$gi" "$gi" > "$tmp" 2>/dev/null && mv -f "$tmp" "$gi" 2>/dev/null; then
+    if [ -n "$have" ]; then printf 'updated\n'; else printf 'added\n'; fi
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    printf 'failed\n'
+  fi
+}
+
+guard_private() { # guard_private <root> - ensure_private for the CLI writers: a note on stderr
+                  # when it had to change the owner's .gitignore, silence otherwise
+  case "$(ensure_private "$1")" in
+    added|updated) echo "litopys: git-ignored $(privacy_label) in $1/.gitignore" >&2 ;;
+  esac
+  return 0
+}
+
+# One line, `[litopys] privacy:` when nothing needs the owner and `[litopys] PRIVACY:` when
+# something does. It never contains `"` or `\` - the hook's no-jq path embeds it in JSON as is.
+cmd_privacy() {
+  if [ $# -gt 0 ]; then
+    echo "litopys privacy: takes no arguments (got '$1')" >&2; usage; return 2
+  fi
+  local root state label probe tracked others n m bad="" msg="" note="" loud=0
+  # The litopys pathspecs, as an array for git and as text for the command printed to the owner.
+  local -a scope=(.litopys '*/.litopys/*' docs/chronicle)
+  local shown=".litopys '*/.litopys/*' docs/chronicle"
+  if [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ]; then
+    scope=(.litopys '*/.litopys/*'); shown=".litopys '*/.litopys/*'"
+  fi
+  root="$(project_root)"
+  state="$(ensure_private "$root")"
+  label="$(privacy_label)"
+  case "$state" in
+    nogitbin) echo "[litopys] PRIVACY: git not found - .gitignore not checked"; return 0 ;;
+    nogit)    echo "[litopys] privacy: not a git repository - nothing to guard"; return 0 ;;
+    failed)   echo "[litopys] PRIVACY: cannot write .gitignore - $label NOT git-ignored"; return 0 ;;
+    added)    msg="added $label to .gitignore - commit it"; loud=1 ;;
+    updated)  msg="rewrote the litopys block in .gitignore - commit it"; loud=1 ;;
+    symlink)  note=" (.gitignore is a symlink - checked, not rewritten)" ;;
+  esac
+
+  # git's own matcher is the judge: a later `!` rule or a nested .gitignore can undo the block.
+  for probe in .litopys/raw/probe.md docs/chronicle/probe.md docs/chronicle/sessions/probe.md; do
+    case "$probe" in docs/*) [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ] && continue ;; esac
+    if ! git -C "$root" check-ignore -q --no-index -- "$probe" 2>/dev/null; then
+      case " $bad " in *" ${probe%/*}/ "*) : ;; *) bad="${bad:+$bad }${probe%/*}/" ;; esac
+    fi
+  done
+  if [ -n "$bad" ]; then
+    msg="${msg:+$msg · }NOT ignored: $bad - a later .gitignore rule overrides the litopys block"; loud=1
+  fi
+  # ... and the real files: an owner rule like `!docs/chronicle/sessions/2026-*` un-ignores real
+  # records while every probe name above stays ignored.
+  others="$(git -C "$root" ls-files --others --exclude-standard -- "${scope[@]}" 2>/dev/null \
+    | grep -vx 'docs/chronicle/golden-questions.md' || true)"
+  m="$(printf '%s' "$others" | grep -c . 2>/dev/null || true)"
+  m="${m:-0}"
+  if [ "$m" -gt 0 ]; then
+    msg="${msg:+$msg · }$m litopys file(s) NOT ignored - git would add them; a .gitignore rule un-ignores them"; loud=1
+  fi
+
+  # Tracked before the block existed: .gitignore cannot hide those. The command is printed,
+  # never run - untracking stages deletions on the owner's branch. It lists exactly the pathspecs
+  # the count used, so running it clears this warning.
+  tracked="$(git -C "$root" ls-files -ci --exclude-standard -- "${scope[@]}" 2>/dev/null || true)"
+  n="$(printf '%s' "$tracked" | grep -c . 2>/dev/null || true)"
+  n="${n:-0}"
+  if [ "$n" -gt 0 ]; then
+    msg="${msg:+$msg · }$n litopys file(s) already tracked by git - untrack: git ls-files -ci --exclude-standard -z -- $shown | xargs -0 git rm --cached --quiet -- ; then commit (history already pushed stays on the remote)"
+    loud=1
+  fi
+
+  if [ "$loud" -eq 1 ]; then
+    echo "[litopys] PRIVACY: $msg$note"
+  elif [ "${LITOPYS_TRACK_CHRONICLE:-}" = "1" ]; then
+    echo "[litopys] privacy: .litopys/ git-ignored ✓ · docs/chronicle/ tracked on purpose (LITOPYS_TRACK_CHRONICLE=1)$note"
+  else
+    echo "[litopys] privacy: $label git-ignored ✓$note"
+  fi
+  return 0
 }
 
 cmd_append() {
@@ -141,6 +295,7 @@ cmd_append() {
     echo "litopys append: --ref is empty after normalisation" >&2; usage; return 2
   fi
 
+  guard_private "$root"
   file="$root/docs/chronicle/$month.md"
   if [ ! -f "$file" ]; then
     mkdir -p "$root/docs/chronicle" || { echo "litopys append: cannot create $root/docs/chronicle" >&2; return 0; }
@@ -314,10 +469,10 @@ cmd_bench() {
   fi
 
   # --- C1: .litopys/ exists and ignores itself before anything is written -------------------
-  if ! mkdir -p "$root/.litopys"; then
+  if ! ensure_scratch "$root"; then
     echo "litopys bench: cannot create $root/.litopys" >&2; return 2
   fi
-  [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
+  guard_private "$root"
 
   local out_file="$root/.litopys/baseline.jsonl"
   local claude_bin="${LITOPYS_CLAUDE:-claude}"
@@ -434,8 +589,38 @@ csv_list() { # csv_list "a, b" -> "[a, b]"   (empty -> "[]")
   printf '[%s]' "$out"
 }
 
-json_str() { # json_str <text> - minimal JSON string escaping (no jq dependency here)
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+json_str() { # json_str <text> - JSON string escaping without jq: backslash, quote, tab, CR and
+             # LF escaped, any other control character dropped - one row stays one line.
+  # One character at a time on purpose: `${s//pat/rep}` treats a backslash or quote in `rep`
+  # differently in bash 3.2, 4.x and 5.2 (patsub_replacement), and macOS still ships 3.2. The
+  # inputs are short (a timestamp, an id, a path, a model name).
+  local s="$1" out="" c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      \\) out="$out"'\\' ;;
+      '"') out="$out"'\"' ;;
+      $'\t') out="$out"'\t' ;;
+      $'\r') out="$out"'\r' ;;
+      $'\n') out="$out"'\n' ;;
+      [[:cntrl:]]) : ;;
+      *) out="$out$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# The record path is built from journal frontmatter, which is data and never a path: the date
+# must look like a date (else the fallback clock's, else zeros) and the id keeps [A-Za-z0-9_-]
+# only - no `/`, no `.`, nothing that can climb out of docs/chronicle/sessions/. `distill next`
+# derives the same path to spot a resumed session, so both go through this one function.
+record_rel() { # record_rel <started> <sid> <fallback-ts> - docs/chronicle/sessions/<date>-<sid8>.md
+  local d s
+  d="$(printf '%s' "$1" | cut -c1-10)"
+  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;; *) d="$(printf '%s' "$3" | cut -c1-10)" ;; esac
+  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;; *) d="0000-00-00" ;; esac
+  s="$(printf '%s' "$2" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-8)"
+  printf 'docs/chronicle/sessions/%s-%s.md\n' "$d" "$s"
 }
 
 bytes() { # bytes <file> - size in bytes, digits only
@@ -541,17 +726,13 @@ distill_record() {
   fi
 
   # --- paths -------------------------------------------------------------------------------
-  local root now rdate sid8 sidsafe rel file
+  local root now rdate sidsafe rel file
   root="$(project_root)"
   now="${LITOPYS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-  if [ -n "$started" ]; then
-    rdate="$(printf '%s' "$started" | cut -c1-10)"
-  else
-    rdate="$(printf '%s' "$now" | cut -c1-10)"; started="-"
-  fi
-  sid8="$(printf '%s' "$sid" | cut -c1-8)"
+  rel="$(record_rel "$started" "$sid" "$now")"
+  rdate="${rel#docs/chronicle/sessions/}"; rdate="${rdate:0:10}"
+  [ -n "$started" ] || started="-"
   sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
-  rel="docs/chronicle/sessions/$rdate-$sid8.md"
   file="$root/$rel"
 
   if [ -f "$file" ] && [ "$force" -ne 1 ]; then
@@ -583,16 +764,20 @@ $body
 RECORD
 )"
 
+  guard_private "$root"
   if ! mkdir -p "$root/docs/chronicle/sessions"; then
     echo "litopys distill record: cannot create $root/docs/chronicle/sessions" >&2; return 2
   fi
   filter="$(redactor "$root")"
   tmp="$file.tmp.$$"
+  # A filter that fails or prints nothing must not become a passthrough: the unfiltered record
+  # is refused (exit 2, journal still queued) instead of written.
   if printf '%s\n' "$record" | redact_filter "$filter" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv "$tmp" "$file"
   else
     rm -f "$tmp" 2>/dev/null || true
-    printf '%s\n' "$record" > "$file"
+    echo "litopys distill record: the redactor ($filter) failed - record not written, journal left in the queue" >&2
+    return 2
   fi
 
   # --- one chronicle line, through cmd_append's own path (one writer for the monthly file) --
@@ -601,19 +786,18 @@ RECORD
   # --- the run manifest: exactly the paths this run wrote, repo-relative, one per line ------
   # `distill finish` commits these and nothing else (review round 1, major 3). Appended only
   # after a successful write - a refused `record` (exit 2) has returned long before here.
-  if mkdir -p "$root/.litopys" 2>/dev/null; then
+  if ensure_scratch "$root"; then
     printf '%s\ndocs/chronicle/%s.md\n' "$rel" "$(printf '%s' "$now" | cut -c1-7)" \
       >> "$root/.litopys/distill.paths"
   fi
 
   # --- the journal leaves the queue (C12: done/ only) --------------------------------------
-  if mkdir -p "$root/.litopys/raw/done"; then
-    [ -f "$root/.litopys/.gitignore" ] || printf '*\n' > "$root/.litopys/.gitignore"
+  if ensure_scratch "$root" && mkdir -p "$root/.litopys/raw/done"; then
     mv -f "$journal" "$root/.litopys/raw/done/$sidsafe.md" 2>/dev/null || true
   fi
 
   # --- one C14 cost row --------------------------------------------------------------------
-  if mkdir -p "$root/.litopys"; then
+  if ensure_scratch "$root"; then
     printf '{"ts":"%s","session_id":"%s","record":"%s","journal_bytes":%s,"body_bytes":%s,"tokens_est":%s,"model":"%s","source":"%s","litopys":"%s"}\n' \
       "$(json_str "$now")" "$(json_str "$sid")" "$(json_str "$rel")" "$jbytes" "$bbytes" "$tokens" \
       "$(json_str "$model")" "$(json_str "$source")" "$(json_str "$VERSION")" \
@@ -688,10 +872,19 @@ distill_next() {
   lock="$root/.litopys/distill.lock"
 
   # --- the mutex: mkdir is atomic on every shell; a 30-minute-old lock dir is reclaimed once ---
-  mkdir -p "$root/.litopys" 2>/dev/null || true
+  ensure_scratch "$root" || true
   if ! mkdir "$lock" 2>/dev/null; then
-    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
-      rm -rf "$lock" 2>/dev/null || true
+    # Reclaim by rename, then re-check what was renamed: a second reclaimer that saw the same
+    # stale lock can only ever move a lock aside, and a fresh one it moved goes straight back.
+    if [ -d "$lock" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
+      && mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+      if [ -n "$(find "$lock.stale.$$" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+        rm -rf "$lock.stale.$$" 2>/dev/null || true
+      else
+        # A fresh lock was moved: give it back, unless a third run has taken the name meanwhile -
+        # then leave it aside rather than nest it or delete it (it may be live).
+        [ -e "$lock" ] || mv "$lock.stale.$$" "$lock" 2>/dev/null || true
+      fi
     fi
     if ! mkdir "$lock" 2>/dev/null; then
       echo "locked" >&2
@@ -702,10 +895,6 @@ distill_next() {
 
   mkdir -p "$raw" 2>/dev/null || true
   mkdir -p "$raw/skipped" 2>/dev/null || true
-  if ! [ -f "$root/.litopys/.gitignore" ]; then
-    mkdir -p "$root/.litopys" 2>/dev/null || true
-    printf '*\n' > "$root/.litopys/.gitignore" 2>/dev/null || true
-  fi
 
   local -a files=() remain=()
   local f
@@ -720,8 +909,8 @@ distill_next() {
   # mid-session, the Stop hook re-creates it as a headless fragment, and the next run distills
   # the plugin talking to itself. Only a journal that already passes eligibility (last block
   # `## closed`, or mtime older than 60 minutes) can be parked or selected.
-  local skipped=0 started firstuser lastheader sid eligible epoch
-  local sidsafe rdate sid8 park seq tmplist=""
+  local skipped=0 started firstuser lastheader sid eligible
+  local sidsafe park seq key tmplist=""
   for f in ${files[@]+"${files[@]}"}; do
     IFS=$'\x1f' read -r started firstuser lastheader sid < <(journal_scan "$f")
     eligible=0
@@ -751,9 +940,7 @@ distill_next() {
     # with the same session_id, which every `record` refuses (`record exists`) and which would
     # otherwise hold a cap slot forever. Park it - no merge, the resumed part is not chronicled.
     if [ -n "$sid" ] && [ -n "$started" ]; then
-      rdate="$(printf '%s' "$started" | cut -c1-10)"
-      sid8="$(printf '%s' "$sid" | cut -c1-8)"
-      if [ -f "$root/docs/chronicle/sessions/$rdate-$sid8.md" ]; then
+      if [ -f "$root/$(record_rel "$started" "$sid" "$started")" ]; then
         sidsafe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
         park="$raw/skipped/$sidsafe.resumed.md"
         seq=2
@@ -770,29 +957,30 @@ distill_next() {
       fi
     fi
 
-    # --- a candidate: keep its sort key, by `started` (file mtime when absent) --------------
+    # --- a candidate: keep its sort key, the UTC ISO `started` (file mtime when absent) ------
+    # ISO-8601 UTC sorts as text, so no `date -d` / `stat -c` (GNU-only; on BSD every key read
+    # 0 and the queue order was silently wrong). `date -r <file>` is GNU, BSD and busybox alike.
     remain+=("$f")
-    epoch=""
-    if [ -n "$started" ]; then
-      epoch="$(date -u -d "$started" +%s 2>/dev/null || true)"
-    fi
-    if [ -z "$epoch" ]; then
-      epoch="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
-    fi
+    key="$started"
+    case "$key" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) key="$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+         [ -n "$key" ] || key="0000-00-00T00:00:00Z" ;;
+    esac
     # Real tab and newline, and `printf %s` below: `%b` would interpret the backslash escapes
     # of a Windows root (`\Users`, `\temp`, `\x..`) inside the path (review round 1, major 2).
-    tmplist="$tmplist$epoch"$'\t'"$f"$'\n'
+    tmplist="$tmplist$key"$'\t'"$f"$'\n'
   done
   local pending=${#remain[@]}
 
   local -a selected=()
-  local sepoch sfile
-  while IFS=$'\t' read -r sepoch sfile; do
+  local skey sfile
+  while IFS=$'\t' read -r skey sfile; do
     [ -n "$sfile" ] || continue
     if [ "${#selected[@]}" -lt "$max" ]; then
       selected+=("$sfile")
     fi
-  done < <(printf '%s' "$tmplist" | sort -n -t $'\t' -k1,1)
+  done < <(printf '%s' "$tmplist" | LC_ALL=C sort -t $'\t' -k1,1)
 
   local k=${#selected[@]}
   for f in ${selected[@]+"${selected[@]}"}; do
@@ -808,8 +996,9 @@ distill_next() {
   return 0
 }
 
-# --- distill finish (C12/C14) ---------------------------------------------------------------
-# Step 3 of the distiller: commit *only the paths this run wrote* - the manifest
+# --- distill finish (C12/C14/C17) -----------------------------------------------------------
+# Step 3 of the distiller. By default (C17) it only releases the lock: the records are
+# git-ignored and stay local. With LITOPYS_TRACK_CHRONICLE=1 it commits *only the paths this run wrote* - the manifest
 # `.litopys/distill.paths` that `distill record` appends to - on whatever branch the host is on,
 # and release the lock. Never a gate: a repo that cannot take the commit keeps the records in the
 # working tree and gets one line saying why, still exit 0. The host's index is never read and
@@ -857,6 +1046,29 @@ distill_finish() {
   lock="$root/.litopys/distill.lock"
   manifest="$root/.litopys/distill.paths"
 
+  # C17 - private by default: the records are written and git-ignored, so there is nothing to
+  # commit and the manifest has done its job. Only the owner's explicit opt-in commits them.
+  # The message says only what git confirms: every path this run wrote is checked with git's
+  # own matcher before the line claims it is ignored.
+  if [ "${LITOPYS_TRACK_CHRONICLE:-}" != "1" ]; then
+    local why="docs/chronicle/ is git-ignored (LITOPYS_TRACK_CHRONICLE=1 commits it)" mp
+    if [ "$(git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]; then
+      why="not a git repository"
+    elif [ -f "$manifest" ]; then
+      while IFS= read -r mp || [ -n "$mp" ]; do
+        mp="${mp%$'\r'}"
+        [ -n "$mp" ] && [ -e "$root/$mp" ] || continue
+        if ! git -C "$root" check-ignore -q -- "$mp" 2>/dev/null; then
+          why="records NOT git-ignored - run bin/litopys privacy"; break
+        fi
+      done < "$manifest"
+    fi
+    rm -rf "$lock" 2>/dev/null || true
+    rm -f "$manifest" 2>/dev/null || true
+    printf 'kept local: %s\n' "$why"
+    return 0
+  fi
+
   # --- the manifest, deduplicated, in the order it was written ------------------------------
   local -a paths=()
   local p q dup
@@ -876,7 +1088,7 @@ distill_finish() {
 
   reason="$(git_block_reason "$root")"
   if [ -z "$reason" ]; then
-    errfile="$(mktemp 2>/dev/null || printf '%s' "$root/.litopys/.finish-stderr")"
+    errfile="$(mktemp 2>/dev/null || { ensure_scratch "$root"; printf '%s' "$root/.litopys/.finish-stderr"; })"
     if [ "${#paths[@]}" -eq 0 ]; then
       reason="nothing to commit"
     elif ! git -C "$root" add -- ${paths[@]+"${paths[@]}"} 2>"$errfile"; then
@@ -935,6 +1147,7 @@ case "$SUB" in
   append) cmd_append "$@"; exit $? ;;
   bench) cmd_bench "$@"; exit $? ;;
   distill) cmd_distill "$@"; exit $? ;;
+  privacy) cmd_privacy "$@"; exit $? ;;
   --version|-v|version) echo "$VERSION"; exit 0 ;;
   help|--help|-h) usage; exit 0 ;;
   *) echo "litopys: unknown subcommand '$SUB'" >&2; usage; exit 2 ;;

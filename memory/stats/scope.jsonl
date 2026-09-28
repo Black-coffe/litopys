@@ -147,3 +147,7 @@
 {"ts":"2026-09-21T16:43:56Z","story":"litopys-phase-2-distill-08-wiki-chronicle-format","declared":1,"changed":3,"out_of_scope":2}
 {"ts":"2026-09-21T16:44:47Z","story":"litopys-phase-2-distill-08-wiki-chronicle-format","declared":1,"changed":3,"out_of_scope":2}
 {"ts":"2026-09-21T16:46:04Z","story":"litopys-phase-2-distill-08-wiki-chronicle-format","declared":1,"changed":3,"out_of_scope":2}
+{"ts":"2026-09-28T21:18:25Z","story":"litopys-privacy-guard-01-gitignore-guard","declared":8,"changed":10,"out_of_scope":2}
+{"ts":"2026-09-28T21:28:00Z","story":"litopys-privacy-guard-02-micro-fixes","declared":5,"changed":7,"out_of_scope":2}
+{"ts":"2026-09-28T21:32:50Z","story":"litopys-privacy-guard-03-docs-release","declared":19,"changed":22,"out_of_scope":3}
+{"ts":"2026-09-28T22:05:37Z","story":"litopys-privacy-guard-04-repair-round-1","declared":29,"changed":14,"out_of_scope":2}
