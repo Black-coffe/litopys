@@ -15,7 +15,7 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.2.1"
+VERSION="0.3.0"
 KINDS="grill brief verdict ship handoff note session"
 
 usage() {

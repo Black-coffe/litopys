@@ -1,14 +1,15 @@
 {
   "name": "litopys",
-  "version": "0.2.1",
-  "description": "Long-term project memory for Claude Code: a dated chronicle of sessions plus a wiki, written without a model call.",
+  "version": "0.3.0",
+  "description": "Long-term project memory for Claude Code: hooks journal every session without a model call, a Sonnet subagent distills session records, /litopys:recall answers with refs. Private by default: everything it writes is git-ignored and re-checked every session.",
   "author": {
     "name": "Andrei"
   },
   "keywords": [
     "memory",
     "chronicle",
-    "wiki",
+    "privacy",
+    "claude-code",
     "vulyk"
   ],
   "homepage": "https://github.com/Black-coffe/litopys",

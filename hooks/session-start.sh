@@ -49,7 +49,7 @@ else
 fi
 
 version="$(jq -r '.version // empty' "$plugin_root/.claude-plugin/plugin.json" 2>/dev/null || true)"
-[ -n "$version" ] || version="0.2.1"
+[ -n "$version" ] || version="0.3.0"
 
 count_md() { # count_md <dir> [glob] - files matching <glob> (default *.md) directly in <dir>
   local n=0 f

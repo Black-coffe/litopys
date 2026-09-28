@@ -182,7 +182,7 @@ eq "hookEventName" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOu
 ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
 eq "banner is exactly 6 lines" "6" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
 eq "every banner line is tagged" "0" "$(printf '%s\n' "$ctx" | grep -cv '^\[litopys\] ')"
-printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.2.1 · project chronicle"
+printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.3.0 · project chronicle"
 printf '%s\n' "$ctx" | expect "line 2: chronicle count" "[litopys] chronicle: docs/chronicle/ (2 files)"
 printf '%s\n' "$ctx" | expect "line 3: last entry date" "[litopys] last entry: 2026-09-21"
 printf '%s\n' "$ctx" | expect "line 4: distill pending count (top-level only)" "[litopys] distill: 2 pending · run /litopys:distill"

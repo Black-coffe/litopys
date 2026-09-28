@@ -3,12 +3,12 @@
   "owner": {
     "name": "Black-coffe"
   },
-  "description": "litopys - long-term project memory for Claude Code: a dated chronicle of sessions plus a wiki, written without a model call.",
+  "description": "litopys - long-term project memory for Claude Code, private by default.",
   "plugins": [
     {
       "name": "litopys",
       "displayName": "Litopys",
-      "description": "Project memory: bin/litopys append writes dated chronicle lines, /litopys:recall answers from git history and docs, four hooks keep a raw per-session journal under .litopys/raw/.",
+      "description": "Project memory for Claude Code: hooks keep a raw per-session journal without a model call, /litopys:distill turns it into session records, /litopys:recall answers from project history with refs. Everything it writes is git-ignored by default and re-checked every session.",
       "source": "./"
     }
   ]
