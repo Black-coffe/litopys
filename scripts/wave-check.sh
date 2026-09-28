@@ -18,6 +18,8 @@
 #   collision  - two stories in the SAME wave declare overlapping paths
 #   order      - a story's wave is not strictly later than each of its blockers' waves
 #   dangling   - a `blocked_by:` id that matches no story file in the spec
+#   manual     - a `blocked_by: manual:<id>` whose id is not one plain file name (0.19): a hand
+#                step, satisfied by <spec>/manual/<id>; every declared step is listed at the end
 #   no-files   - a story with an empty `## Files` block (unmeasurable, uncollidable)
 #   missing    - a declared path whose own parent directory does not exist: a typo, or a
 #                plan that has not noticed it must create that directory first
@@ -26,6 +28,9 @@
 #   verify-gap - the verification command names paths and none of them intersect this
 #                story's `## Files` - the command may not be able to fail for this work
 #   repeat     - a `repeat:` line under `## Verification` that is not a positive integer
+#   verify-cell - a `## Verification` segment that is not a `## Commands` cell of the
+#                constitution (CLAUDE.vulyk.md if present, else CLAUDE.md): close-story
+#                refuses to run it, so the gap surfaces here at plan time, not mid-build
 #
 # Limits, stated rather than hidden: a verification command that names NO path (a whole
 # suite) cannot be judged here, and a path that resolves but is simply the wrong file
@@ -41,6 +46,12 @@
 
 set -u
 shopt -s nullglob globstar 2>/dev/null || true
+
+# lib.sh carries the one ## Commands parser (command_cell_exists) and the one constitution
+# lookup close-story uses - the verify-cell check below must agree with it byte for byte.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/lib.sh
+. "$HERE/lib.sh"
 
 SPEC="${1:-}"
 if [ -z "$SPEC" ] || [ ! -d "$SPEC" ]; then
@@ -58,6 +69,7 @@ if [ -n "$ROOT" ] && cd "$ROOT" 2>/dev/null; then
 else
   RESOLVE=0
 fi
+CONSTITUTION=""; [ "$RESOLVE" -eq 1 ] && CONSTITUTION="$(constitution_file "$ROOT")"
 
 # --- gather stories ----------------------------------------------------------
 STORIES=""
@@ -74,6 +86,12 @@ fi
 
 fm() { # fm <file> <key> - first frontmatter-style "key: value", value printed raw
   awk -v k="$2" -F': *' '$1 == k { sub(/[[:space:]]*#.*$/, "", $2); print $2; exit }' "$1"
+}
+
+blockers_of() { # blockers_of <file> - the `blocked_by:` entries, one per line. Not fm: its
+  # ': *' split cuts `manual:<id>` at the colon (0.19, the same rule as cycle.sh's blockers_of).
+  awk '/^blocked_by:/ { sub(/^blocked_by:/, ""); sub(/#.*$/, ""); gsub(/[][\r]/, ""); gsub(/,/, "\n"); print; exit }' "$1" \
+    | sed 's/^ *//; s/ *$//' | grep -v '^$' || true
 }
 
 files_of() { # the `## Files` block, comments skipped (same parser as scope-check.sh)
@@ -127,6 +145,7 @@ path_status() { # path_status <declared-path> - ok | new | missing | empty-glob
 }
 
 PROBLEMS=0
+MANUAL=""
 report() { PROBLEMS=$((PROBLEMS+1)); echo "  ! $1"; }
 
 # --- per-story sanity --------------------------------------------------------
@@ -194,11 +213,40 @@ CMDP_EOF
         [ "$hit" -eq 0 ] && report "verify-gap: $id's verification names paths that do not intersect its '## Files' - check the command can fail for THIS story (an ignore file or a wrong directory makes green vacuous)"
       fi
     fi
+    # 3. will close-story agree to run it? The same rule it applies (R11/C-4, r2m9): a line is
+    #    a cell whole, or every ` && ` segment is one; "none — reviewed by lead-review" runs
+    #    nothing and passes. `repeat:` is not a command.
+    if [ "$RESOLVE" -eq 1 ]; then
+      while IFS= read -r vl; do
+        [ -n "$vl" ] || continue
+        [ "$vl" = "none — reviewed by lead-review" ] && continue
+        command_cell_exists "$CONSTITUTION" "$vl" && continue
+        while IFS= read -r seg; do
+          [ -n "$seg" ] || continue
+          command_cell_exists "$CONSTITUTION" "$seg" \
+            || report "verify-cell: $id's verification '$seg' is not a ## Commands cell of $(basename "$CONSTITUTION") - close-story will refuse to run it"
+        done <<SEG_EOF
+$(verification_segments "$vl")
+SEG_EOF
+      done <<VL_EOF
+$(printf '%s\n' "$verify" | awk -F': *' '$1 !~ /^repeat$/')
+VL_EOF
+    fi
   fi
 
   wave="$(fm "$f" wave)"; [ -n "$wave" ] || wave=1
-  blockers="$(fm "$f" blocked_by | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' || true)"
+  blockers="$(blockers_of "$f")"
   for b in $blockers; do
+    case "$b" in
+      manual:*)
+        mid="${b#manual:}"
+        case "$mid" in
+          ''|.*|-*|*/*|*\\*|*..*|*\"*|*\'*)
+            report "manual:    $id is blocked_by '$b' - a manual step id is one plain file name under $SPEC/manual/ (no /, \\, .., quotes, leading . or -)" ;;
+          *) case " $MANUAL " in *" $mid "*) ;; *) MANUAL="${MANUAL:+$MANUAL }$mid" ;; esac ;;
+        esac
+        continue ;;
+    esac
     bf=""
     for g in $STORIES; do
       [ "$(fm "$g" story)" = "$b" ] && { bf="$g"; break; }
@@ -239,6 +287,11 @@ EOF1
 done
 
 N="$(printf '%s' "$STORIES" | grep -c .)"
+# 0.19: the hand steps this spec waits on - the driver stops at each until manual-done records it
+for mid in $MANUAL; do
+  if [ -f "$SPEC/manual/$mid" ]; then mst=done; else mst=pending; fi
+  echo "wave-check: manual step '$mid' ($mst) - record it with: bash scripts/cycle.sh manual-done $SPEC $mid [note]"
+done
 [ "$RESOLVE" -eq 1 ] || echo "wave-check: not a git repo - path resolution skipped; every other check ran."
 if [ "$PROBLEMS" -eq 0 ]; then
   echo "wave-check: $SPEC - $N stories, dispatchable (no collisions, order holds, paths resolve, every story can turn red)"
