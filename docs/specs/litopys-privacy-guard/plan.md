@@ -67,7 +67,7 @@ block. Then the recon's micro-defects, docs, and the 0.3.0 release.
 
 **Approved:** <owner, date - stage 02, the unconditional gate. /vulyk-build refuses without this line.>
 **Briefed:** via grill, Andrei, 2026-09-28
-**Branch:** <written by /vulyk-build before wave 1>
+**Branch:** vulyk/litopys-privacy-guard
 **Checked:** <written by scripts/human-check.sh>
 **Council:** <written by scripts/cycle.sh judge/escalate>
 **Shipped:** <written by scripts/ship-check.sh --record>
