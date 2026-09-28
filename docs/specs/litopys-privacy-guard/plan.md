@@ -74,5 +74,5 @@ block. Then the recon's micro-defects, docs, and the 0.3.0 release.
 **Briefed:** via grill, Andrei, 2026-09-28
 **Branch:** vulyk/litopys-privacy-guard
 **Checked:** <written by scripts/human-check.sh>
-**Council:** <written by scripts/cycle.sh judge/escalate>
+**Council:** RED round 1, 2026-09-28, at 5c2ba90, pack c9387cdbcdf8
 **Shipped:** <written by scripts/ship-check.sh --record>
