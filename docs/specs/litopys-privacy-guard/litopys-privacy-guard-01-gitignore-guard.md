@@ -1,8 +1,8 @@
 ---
 story: litopys-privacy-guard-01
 spec: litopys-privacy-guard
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: opus             # touches three contracts at once (banner, finish output, host .gitignore)
@@ -64,5 +64,9 @@ memory/map/litopys-plugin.md - Entry points, C9 SessionStart banner, Hooks, Dist
 for t in tests/*.test.sh; do bash "$t" || exit 1; done
 
 ## Implementation notes
+- `bin/litopys`: `ensure_scratch` (every `.litopys/` writer), `privacy_block`/`ensure_private`/`guard_private`/`cmd_privacy` (C17). Block = last begin marker before the first end marker, markers matched by prefix; rewritten only when content differs; `awk` gets the block through ENVIRON, not `-v` (BSD awk rejects newlines in `-v`). `append`, `distill record`, `bench` call `guard_private` (stderr note only on change). `distill finish` returns `kept local: ...` unless `LITOPYS_TRACK_CHRONICLE=1`.
+- `hooks/session-start.sh`: line 6 = privacy line (+ "never git add -f these paths" in a git repo), same line as top-level `systemMessage`; the no-jq path runs the guard via `$BASH` and `${0%/*}` (no `dirname`) and embeds the line raw.
+- `hooks/raw-journal.sh`: self-ignore checked on every block, journal not written when it cannot be created.
+- Tests: new `tests/privacy.test.sh` (G1-G10); `distill.test.sh` F0 default kept-local, F1-F13 under the opt-in; `hooks.test.sh` 6-line banner, git-repo guard case, no-jq guard. Surprise: the no-cwd banner cases ran from the repo root and the (correct) guard wrote this repo's .gitignore - they now run from `$T`; the G10 loop likewise skips non-directories.
 
 ## Findings

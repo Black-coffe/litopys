@@ -468,6 +468,30 @@ outside_chronicle() { # outside_chronicle <root> - paths in HEAD that are not un
   printf '%s' "$out"
 }
 
+# F0 (C17): private by default - `distill record` wrote the litopys block into .gitignore, and
+# `finish` commits nothing, stages nothing, releases the lock and clears the manifest.
+R0="$(newrepo f0-private)"
+put_record "$R0" "f0aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"
+mkdir -p "$R0/.litopys/distill.lock"
+out="$(CLAUDE_PROJECT_DIR="$R0" bash "$CLI" distill finish 2>/dev/null)"; rc=$?
+eq "F0 distill finish exits 0" "0" "$rc"
+case "$out" in
+  "kept local: "*) echo "  ok    F0 private by default: kept local" ;;
+  *) bad "F0 expected 'kept local: ...', got '$out'" ;;
+esac
+eq "F0 no commit" "1" "$(git -C "$R0" rev-list --count HEAD)"
+eq "F0 nothing staged" "" "$(git -C "$R0" diff --cached --name-only)"
+no_file "F0 lock released" "$R0/.litopys/distill.lock"
+no_file "F0 manifest cleared" "$R0/.litopys/distill.paths"
+[ -f "$R0/docs/chronicle/sessions/2026-09-18-f0aaaaaa.md" ]
+eq "F0 the record is on disk" "0" "$?"
+git -C "$R0" check-ignore -q -- "docs/chronicle/sessions/2026-09-18-f0aaaaaa.md"
+eq "F0 the record is git-ignored" "0" "$?"
+eq "F0 git sees only the new .gitignore" "?? .gitignore" "$(git -C "$R0" status --porcelain)"
+
+# F1-F13 run with the owner's opt-in: the ADR-007 commit contract, unchanged.
+export LITOPYS_TRACK_CHRONICLE=1
+
 # F1: the happy path - only docs/chronicle/ is committed, the host's index is left alone.
 R1="$(newrepo f1-happy)"
 put_record "$R1" "f1aaaaaa-1111-2222-3333-444455556666" "2026-09-18T08:00:00Z"

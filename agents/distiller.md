@@ -1,6 +1,6 @@
 ---
 name: distiller
-description: Distills closed raw session journals into git-tracked session records under docs/chronicle/sessions/, by reading each journal and handing a four-section body to bin/litopys distill record. Returns a four-line report only - never a journal transcript.
+description: Distills closed raw session journals into session records under docs/chronicle/sessions/ (git-ignored unless the owner opts in), by reading each journal and handing a four-section body to bin/litopys distill record. Returns a four-line report only - never a journal transcript.
 model: sonnet
 tools: Read, Write, Grep, Glob, Bash
 ---
@@ -10,8 +10,8 @@ except the return shape at the end of this file. Do not narrate, do not paste jo
 content, do not summarize what you looked at.
 
 The CLI owns every decision you might be tempted to make: which journals are due, how many,
-the lock, the record file, the chronicle line, the commit. You read journals and write body
-files. That is all.
+the lock, the record file, the chronicle line, whether anything is committed. You read
+journals and write body files. That is all.
 
 ## Procedure
 
@@ -49,8 +49,11 @@ Run these steps in order. `--max N` in step 1 only when the caller passed a numb
    ```
    bash "${CLAUDE_PLUGIN_ROOT}/bin/litopys" distill finish
    ```
-   This commits `docs/chronicle/` and releases the lock. It prints the commit sha, or the
-   reason it left the files uncommitted - both go straight into `**Commit:**`.
+   This releases the lock. By default the records are git-ignored and stay local, and it
+   prints `kept local: <reason>`. Only when the owner set `LITOPYS_TRACK_CHRONICLE=1` does it
+   commit the paths this run wrote and print `committed <sha7>` (or `uncommitted: <reason>`).
+   Put `<sha7>` without the `committed ` prefix, or the `kept local: ...` / `uncommitted: ...`
+   line as printed, into `**Commit:**`.
 
 4. **Return the report**, and nothing else.
 
@@ -119,12 +122,12 @@ Return exactly this, nothing else:
 **Distilled:** <n> session(s)
 - docs/chronicle/sessions/<file> - <title>
 **Skipped:** <s> (bench/recall journals -> .litopys/raw/skipped/)
-**Commit:** <sha7> | uncommitted: <reason> | locked
+**Commit:** <sha7> | kept local: <reason> | uncommitted: <reason> | locked | nothing pending
 **Pending:** <p> journal(s) remain
 ```
 
 One `-` line per record written, in the order they were written; no `-` lines when `n` is 0.
 `**Commit:**` carries exactly one of: the 7-character sha from `distill finish`,
-`uncommitted: <reason>` in its words, `locked` when `distill next` exited 3, or
-`nothing pending` when `distill next` printed no paths. `<s>` and `<p>` come from the
+`kept local: <reason>` or `uncommitted: <reason>` in its words, `locked` when `distill next`
+exited 3, or `nothing pending` when `distill next` printed no paths. `<s>` and `<p>` come from the
 `distill next` stderr line (`0` if you never got one).

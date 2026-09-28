@@ -1,6 +1,6 @@
 ---
 name: distill
-description: Turns closed raw session journals under .litopys/raw/ into git-tracked session records in docs/chronicle/sessions/. Trigger with /litopys:distill to distill pending journals and commit the chronicle.
+description: Turns closed raw session journals under .litopys/raw/ into session records in docs/chronicle/sessions/, kept local and git-ignored by default. Trigger with /litopys:distill to distill pending journals.
 context: fork
 agent: distiller
 allowed-tools: Read, Write, Grep, Glob, Bash
@@ -18,8 +18,9 @@ $ARGUMENTS` - nothing else. Empty arguments mean the CLI's own default (3).
 
 Follow the procedure in the `distiller` agent exactly: `distill next` to claim the queue,
 then per journal read / write a body / `distill record` / delete the body, then
-`distill finish`. The CLI owns the queue, the lock, the record, the chronicle line and the
-commit; you only read journals and write body files.
+`distill finish`. The CLI owns the queue, the lock, the record, the chronicle line and
+whether anything is committed (records stay local unless `LITOPYS_TRACK_CHRONICLE=1`); you
+only read journals and write body files.
 
 ## Return
 
@@ -28,6 +29,6 @@ Return only:
 **Distilled:** <n> session(s)
 - docs/chronicle/sessions/<file> - <title>
 **Skipped:** <s> (bench/recall journals -> .litopys/raw/skipped/)
-**Commit:** <sha7> | uncommitted: <reason> | locked
+**Commit:** <sha7> | kept local: <reason> | uncommitted: <reason> | locked | nothing pending
 **Pending:** <p> journal(s) remain
 ```
