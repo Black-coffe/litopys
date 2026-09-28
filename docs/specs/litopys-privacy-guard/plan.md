@@ -89,4 +89,4 @@ block. Then the recon's micro-defects, docs, and the 0.3.0 release.
 **Checked:** <written by scripts/human-check.sh>
 **Council:** RED round 1, 2026-09-28, at 5c2ba90, pack c9387cdbcdf8
 **Council:** GREEN round 2, 2026-09-28, at 1ac8128, pack 66f8fcaae22c
-**Shipped:** <written by scripts/ship-check.sh --record>
+**Shipped:** 0.3.0, 2026-09-28, at 3ac4f09 - merged to main; pushed, tagged v0.3.0 and released on GitHub by the Queen per the owner's grill answer 4 (собирай сразу... сам выкачу v0.3.0 и обновлю описание)
