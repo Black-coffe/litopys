@@ -170,7 +170,7 @@ eq "no second chronicle line" "1" "$(lines "$CHRON")"
 if [ -f "$P/.litopys/raw/$SID.md" ]; then echo "  ok    refused run leaves the journal queued"
 else bad "refused run moved the journal"; fi
 
-printf '# Second pass title\n\n## Decisions\n- d\n\n## Problems\n- p\n\n## Brainstorm\n- (none)\n\n## Links\n- x.md - why\n' > "$T/body2.md"
+printf '# Second pass title\n\n## Decisions\n- d\n\n## Corrections\n- (none)\n\n## Problems\n- p\n\n## Brainstorm\n- (none)\n\n## Links\n- x.md - why\n' > "$T/body2.md"
 out="$(LITOPYS_NOW="2026-09-21T13:00:00Z" bash "$CLI" distill record --journal "$P/.litopys/raw/$SID.md" \
   --body "$T/body2.md" --force 2>&1)"
 eq "--force exits 0" "0" "$?"
@@ -196,6 +196,30 @@ badcase() { # badcase <label> <extra args...>   (journal + a project of its own)
 printf '# T\n\n## Decisions\n- d\n\n## Brainstorm\n- b\n\n## Links\n- x\n' > "$T/no-problems.md"
 printf '# T\n\n## Problems\n- p\n\n## Decisions\n- d\n\n## Brainstorm\n- b\n\n## Links\n- x\n' > "$T/out-of-order.md"
 badcase "missing section" --body "$T/no-problems.md"
+
+# --- correction-evidence C2: a «quote» is the owner's exact words, from ## user only -------------
+qbody() { # qbody <file> <decisions line> <corrections line>
+  printf '# Quotes\n\n## Decisions\n%s\n\n## Corrections\n%s\n\n## Problems\n- (none)\n\n## Brainstorm\n- (none)\n\n## Links\n- (none)\n' "$2" "$3" > "$1"
+}
+qbody "$T/q-notice.md" "- d" "- «the subagent finished the scan» — a report quoted as the owner"
+qbody "$T/q-para.md" "- decided to keep one file — «resumed - keep going, same journal file»" "- (none)"
+qbody "$T/q-shape.md" "- d" "- the owner said to finish it"
+qbody "$T/q-old.md" "- d" "- (none)"
+sed -i '/^## Corrections$/,/^## Problems$/{/^## Problems$/!d}' "$T/q-old.md"
+badcase "a Corrections quote found only in a ## notice block" --body "$T/q-notice.md"
+badcase "neighbour: a Decisions quote with one word changed" --body "$T/q-para.md"
+badcase "a Corrections line without the «» — shape" --body "$T/q-shape.md"
+badcase "a four-section body (no Corrections)" --body "$T/q-old.md"
+Q="$(newproj quote-ok)"
+printf '\n## notice · 2026-09-20T10:40:00Z · task-notification\n<result>the subagent finished the scan</result>\n' >> "$Q/.litopys/raw/$SID.md"
+export CLAUDE_PROJECT_DIR="$Q"
+err="$(LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q/.litopys/raw/$SID.md" --body "$T/q-notice.md" 2>&1 >/dev/null)"
+eq "a quote present only in ## notice exits 2" "2" "$?"
+printf '%s' "$err" | expect "the refusal names the quote" "«the subagent finished the scan» is not in the journal's ## user text"
+printf '# Quotes\n\n## Decisions\n- one file — «resumed -   keep going, same   session file»\n\n## Corrections\n- «after the compaction,\tfinish it» — finish, not restart\n\n## Problems\n- (none)\n\n## Brainstorm\n- (none)\n\n## Links\n- (none)\n' > "$T/q-ws.md"
+LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q/.litopys/raw/$SID.md" --body "$T/q-ws.md" >/dev/null 2>&1
+eq "quotes that differ only in whitespace are accepted" "0" "$?"
+cat "$Q/$REL" | expect "the Corrections section lands in the record" "## Corrections"
 badcase "sections out of order" --body "$T/out-of-order.md"
 badcase "source other" --body "$FIX/distill-body.md" --source other
 

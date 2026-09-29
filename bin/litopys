@@ -315,6 +315,11 @@ cmd_append() {
   return 0
 }
 
+wsnorm() { # wsnorm <string> - every whitespace run becomes one space, ends trimmed
+  local s; s="$(printf '%s' "$1" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g')"
+  trim "$s"
+}
+
 trim() { # trim <string> - strip leading and trailing whitespace
   local s="$1"
   s="${s#"${s%%[![:space:]]*}"}"
@@ -669,7 +674,7 @@ distill_record() {
   [ -n "$model" ] || model="sonnet"
 
   # --- journal: frontmatter + C13 block scan -----------------------------------------------
-  local sid="" started="" branch="" line key val fm=0 last_header="" ended="-"
+  local sid="" started="" branch="" line key val fm=0 last_header="" ended="-" inuser=0 human=""
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     if [ "$fm" -eq 0 ] && [ "$line" = "---" ]; then fm=1; continue; fi
@@ -683,7 +688,10 @@ distill_record() {
       esac
       continue
     fi
-    case "$line" in '## '*) last_header="$line" ;; esac
+    case "$line" in
+      '## '*) last_header="$line"; case "$line" in '## user'*) inuser=1 ;; *) inuser=0 ;; esac ;;
+      *) [ "$inuser" -eq 1 ] && human="$human $line" ;;
+    esac
   done < "$journal"
 
   if [ -z "$sid" ]; then
@@ -720,10 +728,40 @@ distill_record() {
   if [ "$first" -eq 1 ] || [ -z "$title" ]; then
     echo "litopys distill record: body is empty or has no '# <title>' line" >&2; return 2
   fi
-  if [ "${secs[*]:-}" != "Decisions Problems Brainstorm Links" ]; then
-    echo "litopys distill record: body needs exactly '## Decisions', '## Problems', '## Brainstorm', '## Links' in that order (got: ${secs[*]:-none})" >&2
+  if [ "${secs[*]:-}" != "Decisions Corrections Problems Brainstorm Links" ]; then
+    echo "litopys distill record: body needs exactly '## Decisions', '## Corrections', '## Problems', '## Brainstorm', '## Links' in that order (got: ${secs[*]:-none})" >&2
     return 2
   fi
+
+  # --- quotes: the owner's exact words or nothing (correction-evidence C2, ADR-011) ---------
+  # A «quote» ends a `## Decisions` line (` — «…»`) or opens a `## Corrections` line
+  # (`- «…» — what`). It must be a whitespace-normalised substring of the journal's `## user`
+  # text; `## notice` blocks never count. A miss refuses the whole record, as a failed redactor does.
+  local hay sec="" q
+  hay="$(wsnorm "$human")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="$(trim "${line%$'\r'}")"
+    case "$line" in '## '*) sec="${line#\#\# }"; continue ;; esac
+    q=""
+    case "$sec" in
+      Decisions)
+        case "$line" in *' — «'*'»') q="${line##* — «}"; q="${q%»}" ;; esac ;;
+      Corrections)
+        case "$line" in
+          ''|'- (none)') continue ;;
+          '- «'*'» — '*) q="${line#- «}"; q="${q%» — *}" ;;
+          *) echo "litopys distill record: a '## Corrections' line must read '- «<owner's exact words>» — <what it corrected>' (got: $line)" >&2
+             return 2 ;;
+        esac ;;
+    esac
+    [ -n "$q" ] || continue
+    q="$(wsnorm "$q")"
+    case "$hay" in
+      *"$q"*) : ;;
+      *) echo "litopys distill record: «$q» is not in the journal's ## user text word for word - quote the owner exactly or leave the quote out" >&2
+         return 2 ;;
+    esac
+  done <<< "$body"
 
   # --- paths -------------------------------------------------------------------------------
   local root now rdate sidsafe rel file
