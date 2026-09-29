@@ -67,3 +67,4 @@ text at no model cost. VULYK's `/vulyk-evolve` counter is a VULYK change made af
 **Council:** GREEN round 2, 2026-09-29, at 8cf018b, pack d7de78ea6786
 **Council:** GREEN round 3, 2026-09-29, at fc12db3, pack d7de78ea6786
 **Shipped:**
+**Shipped:** 0.4.0, 2026-09-29, at cc0b8fd - merged to main, publish pending

@@ -7,3 +7,4 @@
 {"ts":"2026-09-21T14:45:41Z","spec":"litopys-phase-0-1","version":"0.1.0","head":"efedfce","pack":"ac0d2bda0834","note":"merged to main, publish pending"}
 {"ts":"2026-09-21T17:00:56Z","spec":"litopys-phase-2-distill","version":"0.2.0","head":"a999750","pack":"0a6d59a43148","note":"merged to main, published by the Queen on the owner's authorisation"}
 {"ts":"2026-09-28T22:12:23Z","spec":"litopys-privacy-guard","version":"0.3.0","head":"3ac4f09","pack":"66f8fcaae22c","note":"merged to main; pushed, tagged v0.3.0 and released on GitHub by the Queen per the owner's grill answer 4 (собирай сразу... сам выкачу v0.3.0 и обновлю описание)"}
+{"ts":"2026-09-29T21:54:55Z","spec":"correction-evidence","version":"0.4.0","head":"cc0b8fd","pack":"d7de78ea6786","note":"merged to main, publish pending"}
