@@ -1,6 +1,6 @@
 {
   "name": "litopys",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Long-term project memory for Claude Code: hooks journal every session without a model call, a Sonnet subagent distills session records, /litopys:recall answers with refs. Private by default: everything it writes is git-ignored and re-checked every session.",
   "author": {
     "name": "Andrei"

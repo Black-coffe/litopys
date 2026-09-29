@@ -149,7 +149,7 @@ else echo "  ok    nothing written under the cwd"; fi
 # --- plumbing ------------------------------------------------------------------------------
 ver="$(bash "$CLI" --version 2>&1)"
 eq "--version exits 0" "0" "$?"
-printf '%s' "$ver" | expect "--version prints 0.3.0" "0.3.0"
+printf '%s' "$ver" | expect "--version prints 0.4.0" "0.4.0"
 cat "$SRC/.gitignore" | expect ".gitignore ignores .litopys/" ".litopys/"
 
 if [ -s "$FAILED" ]; then
