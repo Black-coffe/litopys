@@ -10,7 +10,7 @@
   seat/court contracts, both drivers): memory/map/cycle.md
 - every `.claude/agents/*.md` and `.claude/commands/vulyk-*.md` (model, tools, report
   contract, what each command runs/never does): memory/map/agents-and-commands.md
-- the litopys plugin (`bin/litopys` verbs incl. `privacy`, hooks, distill/recall skills, C17
+- the litopys plugin (`bin/litopys` verbs incl. `privacy`, `corrections`, hooks, distill/recall skills, C17
   managed .gitignore block, tests): memory/map/litopys-plugin.md
 
 ## Unmapped territory
@@ -66,3 +66,4 @@
 - Distill queue: mkdir lock, N=3 oldest-first cap, first-user-line skip rule, done/skipped layout (litopys 0.2.0, proposed): docs/adr/008-distill-queue-lock-cap-skip-layout.md
 - One raw journal file = one session record regardless of mid-file closed/compact markers (litopys 0.2.0, proposed): docs/adr/009-one-journal-file-equals-one-session-record.md
 - Private by default, managed .gitignore block, per-session guard (litopys 0.3.0, accepted): docs/adr/010-private-by-default-managed-gitignore.md
+- Owner quotes verbatim, harness text as `## notice`, five-section record (litopys 0.4.0, accepted): docs/adr/011-verbatim-owner-quotes-in-records.md

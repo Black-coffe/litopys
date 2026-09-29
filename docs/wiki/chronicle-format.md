@@ -71,8 +71,13 @@ branch: <git -C cwd symbolic-ref --short HEAD, or rev-parse --abbrev-ref HEAD, o
 ```
 
 Body blocks, appended in event order, each preceded by a blank line:
-- `## user · <ts>` followed by the verbatim prompt text (`UserPromptSubmit`, reading
-  `.user_input` then falling back to `.prompt`).
+- `## user · <ts>` followed by the owner's prompt text (`UserPromptSubmit`, reading
+  `.user_input` then falling back to `.prompt`), with harness segments cut out (v0.4.0, ADR-011).
+- `## notice · <ts> · <kind>` - one block per harness segment cut from a prompt, verbatim, after the
+  `## user` block, in prompt order. Kinds: `task-notification`, `system-reminder`, `cross-session`,
+  `pasted` (`NOTICE_RE` in `hooks/raw-journal.sh`; an unclosed tag runs to the prompt's end; code
+  fences stay in `## user`). A prompt with no harness text is written exactly as before. `distill
+  record` and `corrections` never read notice text as the owner's.
 - `## assistant · <ts>` followed by the verbatim `last_assistant_message` (`Stop`). Only the
   *last* assistant message of a turn is captured - any intermediate assistant text before that
   Stop is not recorded. A `Stop` event carrying a non-empty `agent_id` (a subagent's Stop, not

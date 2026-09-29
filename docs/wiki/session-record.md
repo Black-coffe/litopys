@@ -1,8 +1,8 @@
 ---
 domain: session-record
 tags: [litopys, chronicle, distill, session-record]
-related: [docs/wiki/chronicle-format.md, memory/map/litopys-plugin.md, docs/specs/litopys-phase-2-distill/plan.md]
-last-verified: 2026-09-21
+related: [docs/wiki/chronicle-format.md, docs/adr/011-verbatim-owner-quotes-in-records.md, memory/map/litopys-plugin.md, docs/specs/litopys-phase-2-distill/plan.md]
+last-verified: 2026-09-30
 ---
 
 # C11 session record (`bin/litopys distill record`)
@@ -41,7 +41,11 @@ model: <name>                    # --model, default sonnet
 # <title>
 
 ## Decisions
-- ...
+- ... — «owner's words, optional»
+
+## Corrections
+- «owner's exact words» — what it corrected
+- (none)
 
 ## Problems
 - ...
@@ -56,10 +60,15 @@ model: <name>                    # --model, default sonnet
 - **`ended`** is the journal's *last* `## closed · <ts> · <reason>` block, but only when `##
   closed` is also the file's last header line - anything after it (a resume, a `## compact`)
   makes the session still open as far as the record is concerned, and `ended` stays `-` (C13).
-- The body must start with exactly one `# <title>` line, then exactly the four sections
-  `## Decisions`, `## Problems`, `## Brainstorm`, `## Links`, in that order, each present once -
-  any other shape (missing section, wrong order, extra section, no title) is rejected before
+- The body must start with exactly one `# <title>` line, then exactly the five sections
+  `## Decisions`, `## Corrections`, `## Problems`, `## Brainstorm`, `## Links`, in that order,
+  each present once (v0.4.0; a four-section body is refused) - any other shape is rejected before
   anything is written (exit 2, journal untouched).
+- **Quotes are verbatim (ADR-011).** A Decisions line may carry one «…» (first « to last »; an
+  unclosed « is refused). A Corrections line is `- «…» — <what>` or `- (none)`; any other shape
+  is refused. Every «…» must be a whitespace-normalised substring of the journal's `## user`
+  text (`## notice` never counts); a miss refuses the record, exit 2, journal stays queued.
+  Records already on disk are not re-validated. `litopys corrections` lists the Corrections quotes.
 - The whole assembled record (frontmatter + body) is piped through the C16 redactor chain before
   it touches disk (`docs/wiki/chronicle-format.md` C16); a redactor failure falls back to the
   unredacted text rather than dropping the record.
