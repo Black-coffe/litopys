@@ -2,6 +2,28 @@
 
 All notable changes to litopys. Format: Keep a Changelog; versions follow semver.
 
+## [0.4.0] - 2026-09-30
+
+The chronicle carries the owner's real words, and only theirs (spec `correction-evidence`, ADR-011). The source was VULYK's
+editorial-board study of Hindsight, items C1-C3.
+
+### Changed
+- **The journal separates the owner from the harness.** The `prompt` hook now writes subagent task-notifications, system
+  reminders, other sessions' messages and pasted material as their own `## notice · <ts> · <kind>` blocks. The owner's text
+  stays under `## user`, written first. Nothing is dropped. A prompt with no such text is journalled exactly as before. In
+  VULYK's own journals, 61 of 110 "user" blocks had been subagent reports.
+- **Records quote the owner verbatim, or they are not written.** The body gains `## Corrections` between Decisions and
+  Problems. Each line reads `- «exact words» — what they corrected`, and a Decisions line may carry one «quote».
+  `distill record` looks up every quote in the journal's `## user` text, ignoring whitespace; `## notice` never counts.
+  One missing quote, a malformed Corrections line or an unclosed « refuses the record (exit 2, journal stays queued).
+  Records already written are untouched.
+
+### Added
+- **`litopys corrections [--since YYYY-MM-DD] [--lexicon <file>]`.** It lists the owner's corrections from the records,
+  as `<date> · <session8> · record · «quote»`. With a lexicon the consumer passes (litopys ships none), it also lists
+  matching `## user` lines of the raw journals as `lexicon` lines. Matching is case-insensitive in a UTF-8 locale, so
+  Cyrillic folds too. It is read-only, makes no model call, and exits 0 when it finds nothing.
+
 ## [0.3.0] - 2026-09-29
 
 Private by default (spec `litopys-privacy-guard`, ADR-010).
