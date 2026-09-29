@@ -36,6 +36,10 @@ litopys $VERSION
       LITOPYS_TRACK_CHRONICLE=1, which commits only the paths this run wrote
       (.litopys/distill.paths) on the current branch, never the host's other staged or unstaged
       work, and prints 'committed <sha7>' or 'uncommitted: <reason>'. Always exit 0.
+  litopys corrections [--since YYYY-MM-DD] [--lexicon <file>]
+      Print '<date> · <session8> · record · «quote»' for every ## Corrections line of the session
+      records; with --lexicon (one ERE per line, the consumer's own), also '<date> · <session8> ·
+      lexicon · «line»' for every ## user line of the raw journals that matches. Read-only, exit 0.
   litopys privacy
       Make <root>/.gitignore carry the litopys block (.litopys/ and docs/chronicle/*), verify it
       with git, and print one status line; warns about litopys files git already tracks and
@@ -1179,10 +1183,83 @@ cmd_distill() {
   esac
 }
 
+# --- corrections (correction-evidence C3, ADR-011) -------------------------------------------
+# Read-only. The owner's corrections as the records hold them, and - only with a lexicon the
+# consumer passes (litopys ships none) - the raw journals' `## user` lines that match it.
+# `## notice` text is never read. No model, no write; nothing found is still exit 0.
+
+human_lines() { # human_lines <raw journal> - the non-blank lines of its `## user` blocks
+  tr -d '\r' < "$1" | awk '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm == 1 { if ($0 == "---") fm = 2; next }
+    /^## / { u = ($0 ~ /^## user/); next }
+    u && NF { print }'
+}
+
+fm_value() { # fm_value <file> <key> - the first frontmatter value of <key>
+  tr -d '\r' < "$1" | awk -v k="$2" '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm == 1 && $0 == "---" { exit }
+    fm == 1 && index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[ \t]+/, "", v); print v; exit }'
+}
+
+cmd_corrections() {
+  local since="" lexicon=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --since|--lexicon)
+        if [ $# -lt 2 ]; then echo "litopys corrections: $1 needs a value" >&2; usage; return 2; fi
+        case "$1" in --since) since="$2" ;; --lexicon) lexicon="$2" ;; esac
+        shift 2 ;;
+      *) echo "litopys corrections: unknown argument '$1'" >&2; usage; return 2 ;;
+    esac
+  done
+  case "$since" in
+    ''|[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]) : ;;
+    *) echo "litopys corrections: --since wants YYYY-MM-DD (got '$since')" >&2; usage; return 2 ;;
+  esac
+  if [ -n "$lexicon" ] && [ ! -f "$lexicon" ]; then
+    echo "litopys corrections: no lexicon at $lexicon" >&2; return 2
+  fi
+
+  local root f line date sid sec q hit
+  root="$(project_root)"
+  for f in "$root"/docs/chronicle/sessions/*.md; do
+    [ -f "$f" ] || continue
+    date="$(fm_value "$f" date)"; sid="$(fm_value "$f" session_id)"
+    if [ -n "$since" ] && [[ "$date" < "$since" ]]; then continue; fi
+    sec=""
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      case "$line" in '## '*) sec="${line#\#\# }"; continue ;; esac
+      [ "$sec" = "Corrections" ] || continue
+      case "$line" in
+        '- «'*'» — '*) q="${line#- «}"; q="${q%» — *}"
+                       printf '%s · %s · record · «%s»\n' "$date" "${sid:0:8}" "$q" ;;
+      esac
+    done < "$f"
+  done
+
+  [ -n "$lexicon" ] || return 0
+  local pats
+  pats="$(grep -v '^[[:space:]]*$' "$lexicon" 2>/dev/null)"
+  [ -n "$pats" ] || return 0
+  for f in "$root"/.litopys/raw/*.md "$root"/.litopys/raw/done/*.md; do
+    [ -f "$f" ] || continue
+    date="$(fm_value "$f" started)"; date="${date:0:10}"; sid="$(fm_value "$f" session_id)"
+    if [ -n "$since" ] && [[ "$date" < "$since" ]]; then continue; fi
+    while IFS= read -r hit; do
+      [ -n "$hit" ] && printf '%s · %s · lexicon · «%s»\n' "$date" "${sid:0:8}" "$hit"
+    done < <(human_lines "$f" | grep -Ei -e "$pats" 2>/dev/null)
+  done
+  return 0
+}
+
 SUB="${1:-help}"
 [ $# -gt 0 ] && shift
 case "$SUB" in
   append) cmd_append "$@"; exit $? ;;
+  corrections) cmd_corrections "$@"; exit $? ;;
   bench) cmd_bench "$@"; exit $? ;;
   distill) cmd_distill "$@"; exit $? ;;
   privacy) cmd_privacy "$@"; exit $? ;;

@@ -74,7 +74,10 @@ Requirements: `bash` (Git Bash on Windows), `jq` and `git`.
   for more).
 - `/litopys:recall what did we decide about X?`: an answer with refs.
 - `bin/litopys privacy`: run the privacy check by hand.
-- `bin/litopys help`: the whole CLI (`append`, `distill`, `privacy`, `bench`).
+- `bin/litopys corrections [--since YYYY-MM-DD] [--lexicon <file>]`: the owner's corrections, quoted verbatim
+  from session records. With a lexicon you pass in, it also shows matching lines of your own words in the raw
+  journals. It is read-only and makes no model call.
+- `bin/litopys help`: the whole CLI (`append`, `corrections`, `distill`, `privacy`, `bench`).
 
 Environment: `LITOPYS_TRACK_CHRONICLE=1` (commit the chronicle instead of ignoring it),
 `CLAUDE_PROJECT_DIR` (project root override).

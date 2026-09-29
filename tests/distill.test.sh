@@ -778,6 +778,34 @@ eq "F13 a second chronicle line does not inflate <n>" "chore(chronicle): distill
 # F11: argument handling - finish takes none.
 eq "F11 stray argument exits 2" "2" "$(bash "$CLI" distill finish --now > /dev/null 2>&1; echo $?)"
 
+# --- correction-evidence C3: litopys corrections ------------------------------------------------
+C="$T/corr"
+mkdir -p "$C/docs/chronicle/sessions" "$C/.litopys/raw/done"
+export CLAUDE_PROJECT_DIR="$C"
+eq "no records, no journals: nothing printed" "" "$(bash "$CLI" corrections 2>&1)"
+eq "no records, no journals: exit 0" "0" "$(bash "$CLI" corrections > /dev/null 2>&1; echo $?)"
+printf -- '---\nlitopys: session\ndate: 2026-09-25\nsession_id: aaaabbbb-1\n---\n# Old\n\n## Decisions\n- d\n\n## Corrections\n- «не так, верни как было» — the layout was reverted\n- «я же говорил: без сервера» — no daemon\n\n## Problems\n- (none)\n' \
+  > "$C/docs/chronicle/sessions/2026-09-25-aaaabbbb.md"
+printf -- '---\nlitopys: session\ndate: 2026-09-29\nsession_id: ccccdddd-2\n---\n# New\n\n## Decisions\n- d\n\n## Corrections\n- (none)\n\n## Problems\n- (none)\n' \
+  > "$C/docs/chronicle/sessions/2026-09-29-ccccdddd.md"
+out="$(bash "$CLI" corrections)"
+eq "two Corrections lines, one (none) -> exactly two record lines" "2" "$(printf '%s\n' "$out" | grep -c ' · record · ')"
+printf '%s\n' "$out" | expect "a record line carries date, session8 and the quote" "2026-09-25 · aaaabbbb · record · «не так, верни как было»"
+eq "--since drops the older record" "" "$(bash "$CLI" corrections --since 2026-09-26)"
+eq "--since on or before a record's date keeps it" "2" "$(bash "$CLI" corrections --since 2026-09-25 | grep -c ' · record · ')"
+eq "a malformed --since exits 2" "2" "$(bash "$CLI" corrections --since 26.09.2026 > /dev/null 2>&1; echo $?)"
+printf -- '---\nlitopys: raw\nsession_id: eeeeffff-3\nstarted: 2026-09-28T10:00:00Z\n---\n\n## user · 2026-09-28T10:00:00Z\nнет, не так - сделай иначе\n\n## notice · 2026-09-28T10:01:00Z · task-notification\n<result>нет, не так в отчёте субагента</result>\n\n## user · 2026-09-28T10:02:00Z\nспасибо\n' \
+  > "$C/.litopys/raw/done/eeeeffff-3.md"
+printf 'нет, не так\n\n' > "$T/lexicon.txt"
+out="$(bash "$CLI" corrections --lexicon "$T/lexicon.txt")"
+printf '%s\n' "$out" | expect "--lexicon matches a human ## user line" "2026-09-28 · eeeeffff · lexicon · «нет, не так - сделай иначе»"
+printf '%s\n' "$out" | refute "neighbour: the same words inside a ## notice block are not matched" "в отчёте субагента"
+eq "--lexicon keeps the record lines too" "2" "$(printf '%s\n' "$out" | grep -c ' · record · ')"
+eq "without --lexicon no journal is read" "0" "$(bash "$CLI" corrections | grep -c ' · lexicon · ')"
+eq "a missing lexicon file exits 2" "2" "$(bash "$CLI" corrections --lexicon "$T/nope.txt" > /dev/null 2>&1; echo $?)"
+eq "corrections writes nothing under the project" "" "$(cd "$C" && find . -newer "$T/lexicon.txt" -type f)"
+bash "$CLI" help 2>&1 | expect "help lists the verb" "litopys corrections [--since YYYY-MM-DD] [--lexicon <file>]"
+
 if [ -s "$FAILED" ]; then
   echo "distill.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"
   exit 1
