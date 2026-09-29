@@ -28,8 +28,8 @@ The owner asked, 2026-09-30: «Принимать в хронику только
 - **The `prompt` hook splits harness text out.** It writes harness segments as `## notice · <ts> · <kind>` blocks
   (`task-notification`, `system-reminder`, `cross-session`, `pasted`), in prompt order. The human remainder goes first,
   as `## user`. Nothing is dropped. Code fences stay in `## user`.
-- **The body has five sections:** `Decisions`, `Corrections`, `Problems`, `Brainstorm`, `Links`. A Decisions line may end
-  with ` — «…»`. A Corrections line reads `- «…» — <what it corrected>`.
+- **The body has five sections:** `Decisions`, `Corrections`, `Problems`, `Brainstorm`, `Links`. A Decisions line may carry
+  one «…», anywhere on the line (checked from the first « to the last »; an unclosed « is refused). A Corrections line reads `- «…» — <what it corrected>`.
 - **`distill record` checks every quote.** Each «…» must be a whitespace-normalised substring of the journal's `## user`
   text. `## notice` never counts. On a miss, the malformed Corrections line or the missing quote refuses the record:
   exit 2, nothing written, and the journal stays queued. Records already written are never re-validated.

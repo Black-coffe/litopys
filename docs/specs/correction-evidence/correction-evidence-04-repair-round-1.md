@@ -1,7 +1,7 @@
 ---
 story: correction-evidence-04
-status: todo
-returned:
+status: done
+returned: DONE
 worker: worker-code
 model: opus
 wave: 3
@@ -35,3 +35,8 @@ Make the asks and findings council round 1 left RED pass, and change nothing els
 `bash tests/hooks.test.sh`
 `git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null`
 `bash tests/distill.test.sh`
+
+## Implementation notes
+- Finding 1: `distill_record` reads a Decisions quote from the first « to the last », wherever it sits on the line. A line with « and no » is refused. New cases: the original (`— «…».`, trailing period), a neighbour (a quote mid-line), and an unclosed «. HEAD's CLI writes the original as a record. `distiller.md` and ADR-011 now say "one «…» anywhere on the line".
+- Finding 2: `cmd_corrections` runs the lexicon grep under the first UTF-8 locale that `locale -a` lists (C.UTF-8 / C.utf8 / en_US.UTF-8), falling back to C.UTF-8. New cases run with LANG/LC_* unset: lowercase «опять» finds «Опять…» (the original), and uppercase «НЕ ТАК» finds «нет, не так…» (the neighbour).
+- The four minors are left for the next brief. Repair scope is the RED findings only.

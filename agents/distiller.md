@@ -106,8 +106,8 @@ order, each exactly once:
 
 **Quotes.** Text inside «» is the owner's words, copied from a `## user` block. Never paraphrase inside «».
 `distill record` looks up every quote in the journal's `## user` text, ignoring whitespace. If one quote is
-missing, the whole record is refused (exit 2). A Decisions line ends with a quote only when the owner's own
-words decided it; otherwise it has no «». A Corrections line is a place where the owner told the
+missing, the whole record is refused (exit 2). A Decisions line carries a quote only when the owner's own
+words decided it, and then only one; otherwise it has no «». The check reads it from the first « to the last », wherever it sits on the line. A Corrections line is a place where the owner told the
 assistant it was wrong or asked for something to be redone. The quote comes first, then what it corrected.
 If you cannot find the exact words, leave that correction out rather than paraphrase it.
 

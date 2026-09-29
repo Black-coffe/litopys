@@ -749,7 +749,12 @@ distill_record() {
     q=""
     case "$sec" in
       Decisions)
-        case "$line" in *' — «'*'»') q="${line##* — «}"; q="${q%»}" ;; esac ;;
+        # Wherever «…» sits on the line (a trailing period, mid-line): first « to last ».
+        case "$line" in
+          *'«'*'»'*) q="${line#*«}"; q="${q%»*}" ;;
+          *'«'*) echo "litopys distill record: a '## Decisions' line opens « and never closes it (got: $line)" >&2
+                 return 2 ;;
+        esac ;;
       Corrections)
         case "$line" in
           ''|'- (none)') continue ;;
@@ -1244,13 +1249,20 @@ cmd_corrections() {
   local pats
   pats="$(grep -v '^[[:space:]]*$' "$lexicon" 2>/dev/null)"
   [ -n "$pats" ] || return 0
+  # grep -i folds only ASCII in the C locale (Git Bash leaves LANG unset): pick a UTF-8 locale so
+  # a lowercase «опять» also finds the owner's «Опять».
+  local loc="" l
+  for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    if locale -a 2>/dev/null | grep -qx "$l"; then loc="$l"; break; fi
+  done
+  [ -n "$loc" ] || loc="C.UTF-8"
   for f in "$root"/.litopys/raw/*.md "$root"/.litopys/raw/done/*.md; do
     [ -f "$f" ] || continue
     date="$(fm_value "$f" started)"; date="${date:0:10}"; sid="$(fm_value "$f" session_id)"
     if [ -n "$since" ] && [[ "$date" < "$since" ]]; then continue; fi
     while IFS= read -r hit; do
       [ -n "$hit" ] && printf '%s · %s · lexicon · «%s»\n' "$date" "${sid:0:8}" "$hit"
-    done < <(human_lines "$f" | grep -Ei -e "$pats" 2>/dev/null)
+    done < <(human_lines "$f" | LC_ALL="$loc" grep -Ei -e "$pats" 2>/dev/null)
   done
   return 0
 }
