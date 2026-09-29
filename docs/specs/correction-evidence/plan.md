@@ -56,6 +56,7 @@ text at no model cost. VULYK's `/vulyk-evolve` counter is a VULYK change made af
 - The `/vulyk-evolve` counter is VULYK work after this ships. The owner's request names it as a follow-up: «Добавить команду litopys corrections, а после неё — счётчик в /vulyk-evolve (C3).» The confirmed question (answer 3) placed it in VULYK.
 
 ## Plan deltas
+- 2026-09-30, story 02 build: `tests/fixtures/distill-body.md` added to story 02's `## Files`. The five-section check refuses the shared fixture body, so the fixture needs `## Corrections`. It carries no quotes, because other tests pair it with journals that lack its words. Rejected: a second fixture for the old shape, since nothing reads four-section bodies any more.
 
 **Approved:** Andrei, 2026-09-30 («Да»)
 **Briefed:**
