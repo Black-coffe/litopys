@@ -1,8 +1,8 @@
 ---
 story: correction-evidence-02
 spec: correction-evidence
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: sonnet
@@ -26,6 +26,7 @@ ADR-011 records the shape change and the rule.
 - bin/litopys
 - agents/distiller.md
 - tests/distill.test.sh
+- tests/fixtures/distill-body.md
 - docs/adr/011-verbatim-owner-quotes-in-records.md
 
 ## Non-goals
@@ -49,5 +50,8 @@ memory/map/litopys-plugin.md: `bin/litopys` `distill record`, and the distiller 
 `git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null`
 
 ## Implementation notes
+- `bin/litopys` `distill_record`: the journal scan also collects the `## user` text. The section check wants five sections. A quote loop reads the body (Decisions: the last ` — «…»` on the line; Corrections: `- «…» — …`, where any other shape is refused) and checks each `wsnorm`ed quote against the `wsnorm`ed human text. A miss exits 2 before anything is written. New helper `wsnorm`.
+- `tests/fixtures/distill-body.md` gained `## Corrections` / `- (none)`. It is shared by journals that do not hold its words, so it carries no quotes. This file was added to `## Files` as a plan delta. There are 8 new cases in `tests/distill.test.sh`. HEAD's CLI fails 88 assertions against the new tests. The whole suite is green.
+- `agents/distiller.md`: the `## notice` rule, the five-section body and the quote rules. `docs/adr/011-verbatim-owner-quotes-in-records.md`.
 
 ## Findings

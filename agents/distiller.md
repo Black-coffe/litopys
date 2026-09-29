@@ -70,6 +70,9 @@ Run these steps in order. `--max N` in step 1 only when the caller passed a numb
   `## assistant` block paired with them - those are the plugin talking to itself. Anything
   the CLI chooses to skip wholesale it has already moved aside before handing you the path;
   you only ignore such blocks *inside* a journal you were given.
+- `## notice · <ts> · <kind>` blocks (`task-notification`, `system-reminder`, `cross-session`,
+  `pasted`) are harness reports, other sessions and pasted material, never the owner's words.
+  Read them for context; never quote them as the owner and never file them as a correction.
 - **No fact enters a section unless a block in that journal supports it.** No inference from
   file names, no knowledge of this project from elsewhere, no filling a thin session out to
   look complete. A session that decided nothing gets `- (none)` under Decisions.
@@ -79,14 +82,17 @@ Run these steps in order. `--max N` in step 1 only when the caller passed a numb
 
 ## The body
 
-The body file is exactly this shape - one `# ` title line, then the four sections, in this
+The body file is exactly this shape - one `# ` title line, then the five sections, in this
 order, each exactly once:
 
 ```
 # <title, one line>
 
 ## Decisions
-- <what was decided, and why, one line each>
+- <what was decided, and why, one line each> — «<the owner's words that decided it>»
+
+## Corrections
+- «<the owner's exact words>» — <what they corrected>
 
 ## Problems
 - <what broke or blocked, and how it ended>
@@ -98,7 +104,14 @@ order, each exactly once:
 - <repo-relative path or 7-char sha> - <why it matters>
 ```
 
-A section with nothing to say holds the single line `- (none)`. Do not add a fifth section,
+**Quotes.** Text inside «» is the owner's words, copied from a `## user` block. Never paraphrase inside «».
+`distill record` looks up every quote in the journal's `## user` text, ignoring whitespace. If one quote is
+missing, the whole record is refused (exit 2). A Decisions line carries a quote only when the owner's own
+words decided it, and then only one; otherwise it has no «». The check reads it from the first « to the last », wherever it sits on the line. A Corrections line is a place where the owner told the
+assistant it was wrong or asked for something to be redone. The quote comes first, then what it corrected.
+If you cannot find the exact words, leave that correction out rather than paraphrase it.
+
+A section with nothing to say holds the single line `- (none)`. Do not add a sixth section,
 do not add frontmatter, do not wrap the body in a code fence - `distill record` builds the
 frontmatter itself and rejects any other shape (exit 2, nothing written).
 

@@ -170,7 +170,7 @@ eq "no second chronicle line" "1" "$(lines "$CHRON")"
 if [ -f "$P/.litopys/raw/$SID.md" ]; then echo "  ok    refused run leaves the journal queued"
 else bad "refused run moved the journal"; fi
 
-printf '# Second pass title\n\n## Decisions\n- d\n\n## Problems\n- p\n\n## Brainstorm\n- (none)\n\n## Links\n- x.md - why\n' > "$T/body2.md"
+printf '# Second pass title\n\n## Decisions\n- d\n\n## Corrections\n- (none)\n\n## Problems\n- p\n\n## Brainstorm\n- (none)\n\n## Links\n- x.md - why\n' > "$T/body2.md"
 out="$(LITOPYS_NOW="2026-09-21T13:00:00Z" bash "$CLI" distill record --journal "$P/.litopys/raw/$SID.md" \
   --body "$T/body2.md" --force 2>&1)"
 eq "--force exits 0" "0" "$?"
@@ -196,6 +196,36 @@ badcase() { # badcase <label> <extra args...>   (journal + a project of its own)
 printf '# T\n\n## Decisions\n- d\n\n## Brainstorm\n- b\n\n## Links\n- x\n' > "$T/no-problems.md"
 printf '# T\n\n## Problems\n- p\n\n## Decisions\n- d\n\n## Brainstorm\n- b\n\n## Links\n- x\n' > "$T/out-of-order.md"
 badcase "missing section" --body "$T/no-problems.md"
+
+# --- correction-evidence C2: a «quote» is the owner's exact words, from ## user only -------------
+qbody() { # qbody <file> <decisions line> <corrections line>
+  printf '# Quotes\n\n## Decisions\n%s\n\n## Corrections\n%s\n\n## Problems\n- (none)\n\n## Brainstorm\n- (none)\n\n## Links\n- (none)\n' "$2" "$3" > "$1"
+}
+qbody "$T/q-notice.md" "- d" "- «the subagent finished the scan» — a report quoted as the owner"
+qbody "$T/q-para.md" "- decided to keep one file — «resumed - keep going, same journal file»" "- (none)"
+qbody "$T/q-shape.md" "- d" "- the owner said to finish it"
+qbody "$T/q-old.md" "- d" "- (none)"
+sed -i '/^## Corrections$/,/^## Problems$/{/^## Problems$/!d}' "$T/q-old.md"
+badcase "a Corrections quote found only in a ## notice block" --body "$T/q-notice.md"
+badcase "neighbour: a Decisions quote with one word changed" --body "$T/q-para.md"
+badcase "a Corrections line without the «» — shape" --body "$T/q-shape.md"
+badcase "a four-section body (no Corrections)" --body "$T/q-old.md"
+qbody "$T/q-period.md" "- revert — «я этого никогда не говорил»." "- (none)"
+qbody "$T/q-mid.md" "- the owner said «я этого никогда не говорил» so we reverted" "- (none)"
+qbody "$T/q-open.md" "- the owner said «я этого никогда" "- (none)"
+badcase "repair 1: a fabricated Decisions quote followed by a period" --body "$T/q-period.md"
+badcase "repair 1 neighbour: a fabricated Decisions quote mid-line" --body "$T/q-mid.md"
+badcase "repair 1: a Decisions line that opens « and never closes it" --body "$T/q-open.md"
+Q="$(newproj quote-ok)"
+printf '\n## notice · 2026-09-20T10:40:00Z · task-notification\n<result>the subagent finished the scan</result>\n' >> "$Q/.litopys/raw/$SID.md"
+export CLAUDE_PROJECT_DIR="$Q"
+err="$(LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q/.litopys/raw/$SID.md" --body "$T/q-notice.md" 2>&1 >/dev/null)"
+eq "a quote present only in ## notice exits 2" "2" "$?"
+printf '%s' "$err" | expect "the refusal names the quote" "«the subagent finished the scan» is not in the journal's ## user text"
+printf '# Quotes\n\n## Decisions\n- one file — «resumed -   keep going, same   session file»\n\n## Corrections\n- «after the compaction,\tfinish it» — finish, not restart\n\n## Problems\n- (none)\n\n## Brainstorm\n- (none)\n\n## Links\n- (none)\n' > "$T/q-ws.md"
+LITOPYS_NOW="$NOW" bash "$CLI" distill record --journal "$Q/.litopys/raw/$SID.md" --body "$T/q-ws.md" >/dev/null 2>&1
+eq "quotes that differ only in whitespace are accepted" "0" "$?"
+cat "$Q/$REL" | expect "the Corrections section lands in the record" "## Corrections"
 badcase "sections out of order" --body "$T/out-of-order.md"
 badcase "source other" --body "$FIX/distill-body.md" --source other
 
@@ -753,6 +783,43 @@ eq "F13 a second chronicle line does not inflate <n>" "chore(chronicle): distill
 
 # F11: argument handling - finish takes none.
 eq "F11 stray argument exits 2" "2" "$(bash "$CLI" distill finish --now > /dev/null 2>&1; echo $?)"
+
+# --- correction-evidence C3: litopys corrections ------------------------------------------------
+C="$T/corr"
+mkdir -p "$C/docs/chronicle/sessions" "$C/.litopys/raw/done"
+export CLAUDE_PROJECT_DIR="$C"
+eq "no records, no journals: nothing printed" "" "$(bash "$CLI" corrections 2>&1)"
+eq "no records, no journals: exit 0" "0" "$(bash "$CLI" corrections > /dev/null 2>&1; echo $?)"
+printf -- '---\nlitopys: session\ndate: 2026-09-25\nsession_id: aaaabbbb-1\n---\n# Old\n\n## Decisions\n- d\n\n## Corrections\n- «не так, верни как было» — the layout was reverted\n- «я же говорил: без сервера» — no daemon\n\n## Problems\n- (none)\n' \
+  > "$C/docs/chronicle/sessions/2026-09-25-aaaabbbb.md"
+printf -- '---\nlitopys: session\ndate: 2026-09-29\nsession_id: ccccdddd-2\n---\n# New\n\n## Decisions\n- d\n\n## Corrections\n- (none)\n\n## Problems\n- (none)\n' \
+  > "$C/docs/chronicle/sessions/2026-09-29-ccccdddd.md"
+out="$(bash "$CLI" corrections)"
+eq "two Corrections lines, one (none) -> exactly two record lines" "2" "$(printf '%s\n' "$out" | grep -c ' · record · ')"
+printf '%s\n' "$out" | expect "a record line carries date, session8 and the quote" "2026-09-25 · aaaabbbb · record · «не так, верни как было»"
+eq "--since drops the older record" "" "$(bash "$CLI" corrections --since 2026-09-26)"
+eq "--since on or before a record's date keeps it" "2" "$(bash "$CLI" corrections --since 2026-09-25 | grep -c ' · record · ')"
+eq "a malformed --since exits 2" "2" "$(bash "$CLI" corrections --since 26.09.2026 > /dev/null 2>&1; echo $?)"
+printf -- '---\nlitopys: raw\nsession_id: eeeeffff-3\nstarted: 2026-09-28T10:00:00Z\n---\n\n## user · 2026-09-28T10:00:00Z\nнет, не так - сделай иначе\n\n## notice · 2026-09-28T10:01:00Z · task-notification\n<result>нет, не так в отчёте субагента</result>\n\n## user · 2026-09-28T10:02:00Z\nспасибо\n' \
+  > "$C/.litopys/raw/done/eeeeffff-3.md"
+printf 'нет, не так\n\n' > "$T/lexicon.txt"
+out="$(bash "$CLI" corrections --lexicon "$T/lexicon.txt")"
+printf '%s\n' "$out" | expect "--lexicon matches a human ## user line" "2026-09-28 · eeeeffff · lexicon · «нет, не так - сделай иначе»"
+printf '%s\n' "$out" | refute "neighbour: the same words inside a ## notice block are not matched" "в отчёте субагента"
+printf -- '---\nlitopys: raw\nsession_id: 99990000-4\nstarted: 2026-09-28T11:00:00Z\n---\n\n## user · 2026-09-28T11:00:00Z\nОпять не то. Не так, переделай.\n' \
+  > "$C/.litopys/raw/99990000-4.md"
+printf 'опять\n' > "$T/lex-lower.txt"
+env -u LANG -u LC_ALL -u LC_CTYPE bash "$CLI" corrections --lexicon "$T/lex-lower.txt" \
+  | expect "repair 2: a lowercase Cyrillic lexicon line finds the owner's capitalised words (LANG unset)" "99990000 · lexicon · «Опять не то. Не так, переделай.»"
+printf 'НЕ ТАК\n' > "$T/lex-upper.txt"
+env -u LANG -u LC_ALL -u LC_CTYPE bash "$CLI" corrections --lexicon "$T/lex-upper.txt" \
+  | expect "repair 2 neighbour: an uppercase lexicon line finds lowercase words" "eeeeffff · lexicon · «нет, не так - сделай иначе»"
+rm -f "$C/.litopys/raw/99990000-4.md"
+eq "--lexicon keeps the record lines too" "2" "$(printf '%s\n' "$out" | grep -c ' · record · ')"
+eq "without --lexicon no journal is read" "0" "$(bash "$CLI" corrections | grep -c ' · lexicon · ')"
+eq "a missing lexicon file exits 2" "2" "$(bash "$CLI" corrections --lexicon "$T/nope.txt" > /dev/null 2>&1; echo $?)"
+eq "corrections writes nothing under the project" "" "$(cd "$C" && find . -newer "$T/lexicon.txt" -type f)"
+bash "$CLI" help 2>&1 | expect "help lists the verb" "litopys corrections [--since YYYY-MM-DD] [--lexicon <file>]"
 
 if [ -s "$FAILED" ]; then
   echo "distill.test.sh: FAILED - $(grep -c . "$FAILED") assertion(s)"

@@ -157,6 +157,38 @@ printf '{"session_id":"compact-never-was","cwd":"%s","compaction_trigger":"manua
 eq "compact without a journal exits 0" "0" "$?"
 no_file "compact without a journal creates nothing" "$P/.litopys/raw/compact-never-was.md"
 
+# --- correction-evidence C1: harness text is a notice, not the owner ------------------------------
+say() { # say <sid> <prompt text> - feed one UserPromptSubmit payload built by jq (newlines survive)
+  jq -n --arg s "$1" --arg c "$P" --arg p "$2" '{session_id: $s, cwd: $c, prompt: $p}' \
+    | LITOPYS_NOW="$NOW" bash "$RAW" prompt
+}
+NL=$'\n'
+say n1 "<task-notification>${NL}<task-id>a1</task-id>${NL}<result>the subagent's report</result>${NL}</task-notification>"
+N1="$P/.litopys/raw/n1.md"
+cat "$N1" | expect "a notification-only prompt -> one notice block of its kind" "## notice · $NOW · task-notification"
+cat "$N1" | expect "the notice keeps the segment verbatim" "<result>the subagent's report</result>"
+cat "$N1" | refute "a notification-only prompt writes no user block" "## user"
+
+say n2 "first human part <pasted_content id=\"x\">a pasted log${NL}line 2</pasted_content> second human part"
+N2="$P/.litopys/raw/n2.md"
+eq "neighbour: the human parts land in one user block, first" "## user · $NOW" "$(grep '^## ' "$N2" | head -1)"
+eq "neighbour: then the pasted segment as its own notice" "## notice · $NOW · pasted" "$(grep '^## ' "$N2" | sed -n 2p)"
+sed -n '/^## user/,/^## notice/p' "$N2" | expect "both human parts are in the user block" "first human part  second human part"
+sed -n '/^## user/,/^## notice/p' "$N2" | refute "the pasted text is not in the user block" "a pasted log"
+
+say n3 "look <system-reminder>be brief</system-reminder> and <cross-session-message from=\"w\">hi</cross-session-message> done"
+N3="$P/.litopys/raw/n3.md"
+cat "$N3" | expect "a system-reminder is its own notice kind" "## notice · $NOW · system-reminder"
+cat "$N3" | expect "a cross-session message is its own notice kind" "## notice · $NOW · cross-session"
+say n4 "text then <system-reminder>never closed${NL}still the reminder"
+sed -n '/^## notice/,$p' "$P/.litopys/raw/n4.md" | expect "an unclosed tag runs to the end of the prompt" "still the reminder"
+sed -n '/^## user/,/^## notice/p' "$P/.litopys/raw/n4.md" | refute "an unclosed tag takes nothing back into the user block" "never closed"
+
+plain="plain words, \`\`\`a fence\`\`\` and  two  spaces${NL}"
+say n5 "$plain"
+eq "a prompt with no tags is written exactly as before" \
+  "$(printf '\n## user · %s\n%s\n' "$NOW" "${plain%$NL}")" "$(sed -n '/^---$/,/^---$/!p' "$P/.litopys/raw/n5.md")"
+
 # --- no git repo -> branch is '-' --------------------------------------------------------------
 NG="$T/nogit"
 mkdir -p "$NG"
@@ -182,7 +214,7 @@ eq "hookEventName" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOu
 ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
 eq "banner is exactly 6 lines" "6" "$(printf '%s\n' "$ctx" | wc -l | tr -d ' ')"
 eq "every banner line is tagged" "0" "$(printf '%s\n' "$ctx" | grep -cv '^\[litopys\] ')"
-printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.3.0 · project chronicle"
+printf '%s\n' "$ctx" | expect "line 1: version" "[litopys] v0.4.0 · project chronicle"
 printf '%s\n' "$ctx" | expect "line 2: chronicle count" "[litopys] chronicle: docs/chronicle/ (2 files)"
 printf '%s\n' "$ctx" | expect "line 3: last entry date" "[litopys] last entry: 2026-09-21"
 printf '%s\n' "$ctx" | expect "line 4: distill pending count (top-level only)" "[litopys] distill: 2 pending · run /litopys:distill"

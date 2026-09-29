@@ -1,8 +1,8 @@
 ---
 story: correction-evidence-03
 spec: correction-evidence
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: sonnet
@@ -46,5 +46,7 @@ memory/map/litopys-plugin.md: `bin/litopys` verbs and usage.
 `git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null`
 
 ## Implementation notes
+- `bin/litopys`: `cmd_corrections` plus two helpers. `fm_value` reads a frontmatter value. `human_lines` gives the non-blank `## user` lines, via awk, so `## notice` is never read. Records print `record` lines. With `--lexicon`, blank patterns are stripped and the rest go through one `grep -Ei -e` over each journal's human lines. `--since` is a string compare on ISO dates. The verb is added to `usage` and the dispatch.
+- `tests/distill.test.sh`: 14 cases. `README.md`: one usage line, and the verb in the CLI list.
 
 ## Findings
