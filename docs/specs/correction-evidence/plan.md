@@ -59,7 +59,7 @@ text at no model cost. VULYK's `/vulyk-evolve` counter is a VULYK change made af
 
 **Approved:** Andrei, 2026-09-30 («Да»)
 **Briefed:**
-**Branch:**
+**Branch:** vulyk/correction-evidence
 **Checked:**
 **Council:**
 **Shipped:**
