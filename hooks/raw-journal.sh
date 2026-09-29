@@ -87,15 +87,47 @@ ensure_journal() { # create the C8 frontmatter on the first block of the session
   } > "$file" 2>/dev/null || return 1
 }
 
-append_block() { # append_block <label> <verbatim text>
+append_block() { # append_block <label> <verbatim text> [<kind>]
   [ -n "$2" ] || return 0
   ensure_journal || return 0
-  { printf '\n## %s · %s\n' "$1" "$ts"; printf '%s\n' "$2"; } >> "$file" 2>/dev/null || true
+  { printf '\n## %s · %s%s\n' "$1" "$ts" "${3:+ · $3}"; printf '%s\n' "$2"; } >> "$file" 2>/dev/null || true
+}
+
+# Harness text is not the owner's (correction-evidence C1): subagent reports, system reminders,
+# other sessions' messages and pasted material leave the `## user` block and are kept verbatim as
+# `## notice · <ts> · <kind>`, one block per segment, in prompt order. The cut list mirrors VULYK's
+# defect-intake.sh BLOCKS minus code fences, which are the owner's own content; an unclosed tag runs
+# to the end of the prompt. The pattern goes in through --arg so jq never parses its escapes.
+NOTICE_RE='<task-notification\b[^>]*>[\s\S]*?(?:</task-notification\s*>|\z)|<system-reminder\b[^>]*>[\s\S]*?(?:</system-reminder\s*>|\z)|<cross-session-message\b[^>]*/>|<cross-session-message\b[^>]*>[\s\S]*?(?:</cross-session-message\b[^>]*>|\z)|<pasted_content\b[^>]*/>|<pasted_content\b[^>]*>[\s\S]*?(?:</pasted_content\b[^>]*>|\z)'
+
+journal_prompt() {
+  local n i out
+  # The brief says user_input, the docs say prompt: read whichever arrived.
+  n="$(printf '%s' "$payload" | jq -r --arg re "$NOTICE_RE" \
+    '(.user_input // .prompt // "") | if type == "string" then [match($re; "g")] | length else 0 end' 2>/dev/null)"
+  case "$n" in
+    ''|0|*[!0-9]*)  # no harness text (or jq could not tell): the prompt is written exactly as before
+      append_block user "$(printf '%s' "$payload" | jq -r '.user_input // .prompt // empty' 2>/dev/null)"
+      return 0 ;;
+  esac
+  # The human remainder first, so the queue's first-user rule still sees the owner's opening line.
+  append_block user "$(printf '%s' "$payload" | jq -r --arg re "$NOTICE_RE" \
+    '(.user_input // .prompt) | gsub($re; "") | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")' 2>/dev/null)"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    out="$(printf '%s' "$payload" | jq -r --arg re "$NOTICE_RE" --argjson i "$i" '
+      [(.user_input // .prompt) | match($re; "g") | .string][$i]
+      | (if startswith("<task-notification") then "task-notification"
+         elif startswith("<system-reminder") then "system-reminder"
+         elif startswith("<cross-session-message") then "cross-session"
+         else "pasted" end) + "\n" + .' 2>/dev/null)"
+    [ -n "$out" ] && append_block notice "${out#*$'\n'}" "${out%%$'\n'*}"
+    i=$((i + 1))
+  done
 }
 
 case "$MODE" in
-  # The brief says user_input, the docs say prompt: read whichever arrived.
-  prompt) append_block user "$(printf '%s' "$payload" | jq -r '.user_input // .prompt // empty' 2>/dev/null)" ;;
+  prompt) journal_prompt ;;
   stop)   append_block assistant "$(field last_assistant_message)" ;;
   end)    journal_end "$(field reason)" ;;
   compact) journal_compact "$(printf '%s' "$payload" | jq -r '.compaction_trigger // .trigger // "-"' 2>/dev/null)" ;;

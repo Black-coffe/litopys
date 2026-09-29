@@ -1,8 +1,8 @@
 ---
 story: correction-evidence-01
 spec: correction-evidence
-status: todo
-returned:
+status: done
+returned: DONE
 tier: 2
 worker: worker-code
 model: sonnet
@@ -44,5 +44,7 @@ memory/map/litopys-plugin.md: the hooks section (`raw-journal.sh`).
 `git ls-files '*.sh' bin/* | xargs -n1 bash -n && git ls-files '*.json' | xargs -n1 jq -e . > /dev/null`
 
 ## Implementation notes
+- `raw-journal.sh`: `journal_prompt` counts `NOTICE_RE` matches with jq. The pattern is passed via `--arg`, because jq literals reject regex escapes. With 0 matches it takes the old path byte for byte. Otherwise it writes the human remainder, trimmed at the ends, as `## user` first, then one `## notice · <ts> · <kind>` per segment in prompt order. `append_block` takes an optional kind.
+- `tests/hooks.test.sh`: 13 cases (notification-only, pasted between human parts, system-reminder / cross-session kinds, an unclosed tag, a no-tag prompt byte for byte). HEAD's hook fails 9 of them.
 
 ## Findings
