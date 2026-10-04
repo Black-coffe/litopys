@@ -48,13 +48,11 @@ memory/map/agents-and-commands.md
 memory/map/cycle.md
 memory/map/scripts.md
 memory/memory.md
-memory/stats/human.jsonl
-memory/stats/scope.jsonl
-memory/stats/ship.jsonl
 memory/stats/skills.json
 scripts/acceptance-log.sh
 scripts/cycle.sh
 scripts/defects-check.sh
+scripts/evolve-ledger.py
 scripts/git-hooks/post-merge
 scripts/human-check.sh
 scripts/journal.sh
