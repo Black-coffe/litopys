@@ -2,6 +2,16 @@
 
 All notable changes to litopys. Format: Keep a Changelog; versions follow semver.
 
+## [0.4.1] - 2026-10-16
+
+### Fixed
+- **`litopys corrections --lexicon` no longer matches harness text in journals written before 0.4.0.** Those journals
+  (0.2.1 is still installed in many projects) keep `<task-notification>`, `<system-reminder>`, `<cross-session-message>`
+  and `<pasted_content>` blocks inside `## user`, so a VULYK workflow summary such as "the same again per reopen" matched
+  the lexicon word "again" (17 false corrections in one hive). The lexicon scan now cuts each such block, opening tag to
+  closing tag (a self-closing tag included), before it matches. Owner text outside the blocks still counts. Journals
+  written by 0.4.0 and later are unaffected.
+
 ## [0.4.0] - 2026-09-30
 
 The chronicle carries the owner's real words, and only theirs (spec `correction-evidence`, ADR-011). The source was VULYK's

@@ -15,7 +15,7 @@
 # chronicle record that cannot be written must not break the caller that wanted to write it.
 set -u
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 KINDS="grill brief verdict ship handoff note session"
 
 usage() {
@@ -1193,12 +1193,45 @@ cmd_distill() {
 # consumer passes (litopys ships none) - the raw journals' `## user` lines that match it.
 # `## notice` text is never read. No model, no write; nothing found is still exit 0.
 
-human_lines() { # human_lines <raw journal> - the non-blank lines of its `## user` blocks
+human_lines() { # human_lines <raw journal> - the non-blank lines of its `## user` blocks, harness blocks cut out
+  # Journals written before 0.4.0 keep <task-notification>, <system-reminder>, <cross-session-message>
+  # and <pasted_content> blocks inside `## user` (the kinds hooks/raw-journal.sh NOTICE_RE splits off).
+  # Cut each from its opening tag to its closing tag; a self-closing tag has no body; an unclosed
+  # block runs to the next `## ` heading. The owner's text around the blocks stays.
   tr -d '\r' < "$1" | awk '
+    function cut(line,   out, i, k, best, bpos, pos, t, rest) {
+      out = ""
+      while (line != "") {
+        if (skip != "") {
+          if (match(line, "</" skip "[^>]*>")) { line = substr(line, RSTART + RLENGTH); skip = ""; continue }
+          return out
+        }
+        best = ""; bpos = 0
+        for (i = 1; i <= nk; i++) {
+          rest = line; pos = 0
+          while (match(rest, "<" kind[i])) {
+            t = substr(rest, RSTART + RLENGTH, 1)
+            if (t == ">" || t == "/" || t == " " || t == "\t") { pos += RSTART; break }
+            pos += RSTART + RLENGTH - 1; rest = substr(rest, RSTART + RLENGTH)
+          }
+          if (pos && (!bpos || pos < bpos)) { bpos = pos; best = kind[i] }
+        }
+        if (!bpos) return out line
+        out = out substr(line, 1, bpos - 1)
+        line = substr(line, bpos)
+        k = index(line, ">")
+        if (!k) return out
+        t = substr(line, 1, k)
+        line = substr(line, k + 1)
+        if (t !~ /\/>$/) skip = best
+      }
+      return out
+    }
+    BEGIN { nk = split("task-notification system-reminder cross-session-message pasted_content", kind, " ") }
     NR == 1 && $0 == "---" { fm = 1; next }
     fm == 1 { if ($0 == "---") fm = 2; next }
-    /^## / { u = ($0 ~ /^## user/); next }
-    u && NF { print }'
+    /^## / { u = ($0 ~ /^## user/); skip = ""; next }
+    u { l = cut($0); if (l ~ /[^ \t]/) print l }'
 }
 
 fm_value() { # fm_value <file> <key> - the first frontmatter value of <key>
