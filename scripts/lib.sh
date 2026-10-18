@@ -51,31 +51,46 @@ pack_fingerprint() { # pack_fingerprint <spec-dir> - must match every caller exa
 # joins the set because `reopen` writes it; scope.jsonl joins the memory/stats series because
 # `close-story` writes it through scope-check.sh (R4/C-3(b)). VERSION and CHANGELOG.md join in
 # 0.18 (ADR-013 D3): the release commit /vulyk-ship makes must not stale a GREEN round.
-is_paperwork_path() { # is_paperwork_path <repo-relative-path>
+# A hive adds its own paperwork in .claude/vulyk-paperwork (hive_paperwork_path below), a file
+# the installer never ships, owns or touches (ADR-010 amendment 2026-10-16).
+# Callers pass a path as itself: read git's lists with -z, never its C-quoted `"docs/\320..."`.
+is_paperwork_path() { # is_paperwork_path <repo-relative-path> [<root>]
   case "$1" in
     docs/specs/*/plan.md|docs/specs/*/journal.md|docs/specs/*/council/*|docs/specs/*/brief.md| \
     memory/stats/human.jsonl|memory/stats/acceptance.jsonl|memory/stats/ship.jsonl|memory/stats/council.jsonl|memory/stats/scope.jsonl| \
     memory/stats/anomalies.jsonl|memory/stats/evolve.jsonl|memory/stats/skills.json|VERSION|CHANGELOG.md) return 0 ;;
     memory/learnings/*.md)
-      case "${1#memory/learnings/}" in */*) return 1 ;; esac
-      return 0 ;;
-    *) return 1 ;;
+      case "${1#memory/learnings/}" in */*) ;; *) return 0 ;; esac ;;
   esac
+  hive_paperwork_path "$1" "${2:-.}"
+}
+
+# The hive's own globs in <root>/.claude/vulyk-paperwork: one per line, `#` comments, `*` crosses
+# `/`, and a trailing `dir/` covers everything beneath it - the `## Files` dialect, as scope-check
+# reads it. ship-check's stage 03 asks this alone: there the built-in list is not exempt.
+hive_paperwork_path() { # hive_paperwork_path <repo-relative-path> <root>
+  local g f="$2/.claude/vulyk-paperwork"
+  [ -f "$f" ] || return 1
+  while IFS= read -r g || [ -n "$g" ]; do
+    g="${g#"${g%%[![:space:]]*}"}"; g="${g%"${g##*[![:space:]]}"}"   # trim, a CRLF checkout's CR too
+    case "$g" in ''|'#'*) continue ;; esac
+    # shellcheck disable=SC2254
+    case "$g" in */) case "$1" in $g*) return 0 ;; esac ;; esac
+    # shellcheck disable=SC2254
+    case "$1" in $g) return 0 ;; esac
+  done < "$f"
+  return 1
 }
 
 # A commit range is paperwork-only iff every changed path is one the cycle writes itself -
 # never the software. See is_paperwork_path() above for the whitelist itself.
 paperwork_only() { # paperwork_only <root> <from-commit> <to-commit>
-  local changed p
+  local p
   git -C "$1" merge-base --is-ancestor "$2" "$3" 2>/dev/null || return 1
-  changed="$(git -C "$1" diff --name-only "$2" "$3" 2>/dev/null)" || return 1
-  [ -n "$changed" ] || return 0
-  while IFS= read -r p; do
-    is_paperwork_path "$p" || return 1
-  done <<EOF
-$changed
-EOF
-  return 0
+  while IFS= read -r -d '' p; do
+    is_paperwork_path "$p" "$1" || return 1
+  done < <(git -C "$1" diff --name-only -z "$2" "$3" 2>/dev/null)
+  wait $! || return 1   # a diff git could not produce is not paperwork
 }
 
 # A marker line is "filled" when it exists and does not still carry the template's `<...>`.
@@ -84,6 +99,22 @@ marker() { # marker <plan.md> <Name> -> prints the line's value, empty if absent
   v="$(grep -m1 "^\*\*$2:\*\*" "$1" 2>/dev/null | sed "s/^\*\*$2:\*\*[[:space:]]*//")"
   case "$v" in ''|'<'*) return 0 ;; esac
   printf '%s' "$v"
+}
+
+# The one `## Asks` parser: cycle.sh counts and quotes the items (asks_count, ask_item) and
+# trace-check.sh traces story quotes to them, so the two can never read a different list. Asks
+# written only as `> ` quotes once passed trace-check, counted zero in cycle.sh and stopped
+# open-round after a finished build.
+brief_asks() { # brief_asks <brief.md> -> the `## Asks` items, one per line, trailing blanks cut:
+  # every `N. text` line as written; a block with no numbered line gives each `> ` line's text
+  awk '
+    /^##[[:space:]]+Asks[[:space:]]*$/ { inblock=1; next }
+    /^##[[:space:]]/                    { if (inblock) exit }
+    !inblock                            { next }
+    /^[0-9]+\.[[:space:]]/              { s=$0; sub(/[[:space:]]+$/, "", s); num[++n]=s; next }
+    /^>/                                { s=$0; sub(/^>[[:space:]]?/, "", s); sub(/[[:space:]]+$/, "", s); if (s != "") quo[++q]=s }
+    END { if (n) for (i=1; i<=n; i++) print num[i]; else for (i=1; i<=q; i++) print quo[i] }
+  ' "$1" 2>/dev/null
 }
 
 # --- the constitution (ADR-013 D1) -----------------------------------------------------------
@@ -95,20 +126,55 @@ constitution_file() { # constitution_file <root> -> <root>/CLAUDE.vulyk.md if it
   if [ -f "$1/CLAUDE.vulyk.md" ]; then printf '%s' "$1/CLAUDE.vulyk.md"; else printf '%s' "$1/CLAUDE.md"; fi
 }
 
-command_cell_exists() { # command_cell_exists <constitution> <command> -> 0 iff <command> equals,
-  # byte for byte, the backticked command cell of some row of the `## Commands` table (a `\|`
-  # inside the cell is a literal `|`, R11/C-4). Reads only that one table's rows - nothing else
-  # in the constitution - by slicing to the section first.
-  local file="$1" want="$2"
-  [ -f "$file" ] || return 1
+command_cells() { # command_cells <constitution> -> each command a `## Commands` row offers, one per
+  # line, `\|` unescaped (R11/C-4): the whole backticked cell, and each backticked span of it on its
+  # own, so a cell holding two commands (`a` or `b`) offers both. Only that table is read.
+  [ -f "$1" ] || return 0
   awk '
     /^## Commands[[:space:]]*$/ { inblock=1; next }
     /^##[[:space:]]/            { if (inblock) exit }
     inblock                     { print }
-  ' "$file" \
-    | sed -n 's/^|[^|]*|[[:space:]]*`\(.*\)`[[:space:]]*|[[:space:]]*$/\1/p' \
-    | sed 's/\\|/|/g' \
-    | grep -qxF "$want"
+  ' "$1" \
+    | sed -n 's/^|[^|]*|[[:space:]]*\(`.*`\)[[:space:]]*|[[:space:]]*$/\1/p' \
+    | while IFS= read -r cell; do
+        whole="${cell#\`}"; whole="${whole%\`}"
+        printf '%s\n' "$whole"
+        case "$whole" in *'`'*) printf '%s\n' "$cell" | grep -o '`[^`]*`' | sed 's/^`//; s/`$//' ;; esac
+      done \
+    | sed 's/\\|/|/g'
+}
+
+command_cell_exists() { # command_cell_exists <constitution> <command> -> 0 iff <command> is one of
+  # command_cells, byte for byte, or matches one with placeholders. A placeholder is `<name>` with a
+  # spaceless name (so the template's `<fill in>` and a `< in > out` redirect are literal text): it
+  # stands for one or more space-separated arguments, `[<name>]` for none or more. An argument holds
+  # no shell control character (; & | ` $ < > ( )) and never starts with `-`, so `pytest <file>`
+  # admits `pytest tests/a.py` and never `pytest a.py; rm x` or `pytest -p evil`. A placeholder
+  # needs command text before it, and only a single backticked command takes placeholders.
+  local want="$2" cells c re s1 s2 arg
+  cells="$(command_cells "$1")"
+  [ -n "$cells" ] || return 1
+  printf '%s\n' "$cells" | grep -qxF -- "$want" && return 0
+  # A belt beside the argument classes: a command holding a control character never matches a
+  # placeholder cell, only a cell that is literally the same.
+  case "$want" in *[\;\&\|\`\$\<\>\(\)]*) return 1 ;; esac
+  s1="$(printf '\001')"; s2="$(printf '\002')"
+  arg='[^-;\&|`$<>() ][^;\&|`$<>() ]*'
+  while IFS= read -r c; do
+    case "$c" in *'`'*|*"$s1"*|*"$s2"*) continue ;; esac
+    # Placeholders become control-byte sentinels first, so escaping cannot touch them and the
+    # argument classes put in last cannot be re-read as placeholders. The name is any run with no
+    # space and no < or > (`<file>`, `<файл>`), never `<fill in>`.
+    re="$(printf '%s' "$c" | sed -e "s/ \[<[^<> ][^<> ]*>\]/$s1/g" -e "s/<[^<> ][^<> ]*>/$s2/g")"
+    case "$re" in "$s1"*|"$s2"*|" "*) continue ;; esac   # nothing but a placeholder: no command
+    case "$re" in *"$s1"*|*"$s2"*) ;; *) continue ;; esac
+    re="$(printf '%s' "$re" | sed -e 's/[][\.*^$+?(){}|/]/\\&/g' \
+      -e "s/$s1/( $arg)*/g" -e "s/$s2/$arg( $arg)*/g")"
+    printf '%s\n' "$want" | grep -qxE -- "$re" && return 0
+  done <<EOF
+$cells
+EOF
+  return 1
 }
 
 verification_segments() { # verification_segments <line> -> one &&-separated segment per line
@@ -152,15 +218,19 @@ client_path_filled() { # client_path_filled <constitution> -> 0 iff the Profile'
 # generation arrives with no edit; this list is the one place versions live. No dispatch may run
 # below its family's line, whatever an alias, a provider or an env pin resolved to.
 # - A newer model ships: raise its family's line.
-# - `unreleased` marks a floor no model of that family meets yet (today: Haiku, whose newest is 4.5),
-#   so the bare alias itself resolves below the floor. Delete the word the day one ships.
+# - `unreleased` marks a floor no model of that family meets yet, so the bare alias itself resolves
+#   below the floor. Delete the word the day one ships.
+# - `cc>=<x.y.z>` marks a floor the bare alias reaches only from that Claude Code version on: the
+#   alias table ships inside Claude Code, and an older one resolves the alias to the previous model.
+#   Haiku 5.5 shipped on 2026-10-07; Claude Code 2.1.292 still ran `haiku` as Haiku 4.5, 2.1.293 as
+#   5.5. Drop the flag once no supported Claude Code is older.
 # VULYK_MODEL_FLOOR overrides line by line, same shape, lines or `;` (`sonnet 4.5; opus 4.6`), for a
 # hive that runs lower on purpose; a family it does not name keeps the default line.
-model_floor() { # model_floor -> "<family> <major.minor> [unreleased]" lines
+model_floor() { # model_floor -> "<family> <major.minor> [unreleased|cc>=<x.y.z>]" lines
   local defaults='fable 5.1
 opus 5.5
 sonnet 5.5
-haiku 5.5 unreleased'
+haiku 5.5 cc>=2.1.293'
   local over="" f line
   [ -n "${VULYK_MODEL_FLOOR:-}" ] || { printf '%s\n' "$defaults"; return 0; } # the common case, no fork
   over="$(printf '%s\n' "$VULYK_MODEL_FLOOR" | tr ';,' '\n\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; /^$/d')"
@@ -182,20 +252,51 @@ model_version() { # model_version <model id> -> "<family> <major.minor>"; empty 
   fi
 }
 
+claude_code_version() { # claude_code_version -> "x.y.z" of the Claude Code that resolves aliases; empty if unknown
+  # The running session's own version first: Claude Code sets CLAUDE_CODE_VERSION ("2.1.292 (Claude
+  # Code)") for its hooks and tools, and its alias table is the one a dispatch uses even when a newer
+  # binary is already on disk. `claude --version` covers a plain terminal.
+  local v="${CLAUDE_CODE_VERSION:-}"
+  [ -n "$v" ] || v="$(claude --version 2>/dev/null | head -1)"
+  v="${v%% *}"
+  [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]] && printf '%s\n' "$v"
+}
+
+version_lt() { # version_lt <a> <b> - 0 iff dotted version a < b, numerically, missing parts are 0
+  local IFS=. i x y
+  local -a A=($1) B=($2)
+  for ((i = 0; i < ${#A[@]} || i < ${#B[@]}; i++)); do
+    x="${A[i]:-0}"; y="${B[i]:-0}"
+    [ "$((10#$x))" -lt "$((10#$y))" ] && return 0
+    [ "$((10#$x))" -gt "$((10#$y))" ] && return 1
+  done
+  return 1
+}
+
 model_below_floor() { # model_below_floor <model id | alias> -> prints "<family> <version> <floor>", 0 iff below
-  # A resolved ID is compared with its family's line. An alias is below only when its family's line
-  # is `unreleased` (printed as version `alias`); any other alias, an unknown shape or a family with
-  # no line is never below.
-  local fv fam ver fl flag a
+  # A resolved ID is compared with its family's line. An alias is below when its family's line is
+  # `unreleased` (printed as "<family> alias <floor>"), or carries `cc>=<need>` and the Claude Code
+  # that resolves it is older or unknown (printed as "<family> cc <floor> <have|unknown> <need>"):
+  # an unknown version cannot vouch for the alias, and a `<need>` that is not a dotted version (a
+  # typo in VULYK_MODEL_FLOOR) fails closed the same way. Any other alias, an unknown shape or a
+  # family with no line is never below.
+  local fv fam ver fl flag a have need
   a="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"; a="${a%%[[]*}"
   case "$a" in
     fable|opus|sonnet|haiku)
       read -r fl flag <<EOF
 $(model_floor | while read -r f v x; do [ "$f" = "$a" ] && { printf '%s %s' "$v" "$x"; break; }; done)
 EOF
-      [ "${flag:-}" = "unreleased" ] || return 1
-      printf '%s alias %s\n' "$a" "$fl"
-      return 0 ;;
+      case "${flag:-}" in
+        unreleased) printf '%s alias %s\n' "$a" "$fl"; return 0 ;;
+        'cc>='*)
+          need="${flag#cc>=}"; have="$(claude_code_version)"
+          if [ -z "$have" ] || ! [[ "$need" =~ ^[0-9]+(\.[0-9]+)*$ ]] || version_lt "$have" "$need"; then
+            printf '%s cc %s %s %s\n' "$a" "$fl" "${have:-unknown}" "$need"
+            return 0
+          fi ;;
+      esac
+      return 1 ;;
   esac
   fv="$(model_version "${1:-}")"; [ -n "$fv" ] || return 1
   fam="${fv% *}"; ver="${fv#* }"
