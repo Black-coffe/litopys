@@ -76,7 +76,7 @@ Quiet variants only: output is resent each turn. A story's `## Verification` nam
 | Bench test | `bash tests/bench.test.sh` |
 | Hooks test | `bash tests/hooks.test.sh` |
 | Distill test | `bash tests/distill.test.sh` |
-| Full test suite | `for t in tests/*.test.sh; do bash "$t" \|\| exit 1; done` |
+| Full suite / build (round-only) | `for t in tests/*.test.sh; do bash "$t" \|\| exit 1; done` |
 | Lint | `git ls-files '*.sh' bin/* \| xargs -n1 bash -n && git ls-files '*.json' \| xargs -n1 jq -e . > /dev/null` |
 | Build / typecheck | `claude plugin validate .` |
 
