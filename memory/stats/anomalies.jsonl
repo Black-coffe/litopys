@@ -91,3 +91,5 @@
 {"v":1,"ts":"2026-09-28T22:21:37Z","code":"scope_breach","value":2,"threshold":0,"vulyk":"0.20.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-privacy-guard-02-micro-fixes","ref":"scope:litopys-privacy-guard-02-micro-fixes"}
 {"v":1,"ts":"2026-09-28T22:21:37Z","code":"scope_breach","value":3,"threshold":0,"vulyk":"0.20.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-privacy-guard-03-docs-release","ref":"scope:litopys-privacy-guard-03-docs-release"}
 {"v":1,"ts":"2026-09-28T22:21:37Z","code":"scope_breach","value":2,"threshold":0,"vulyk":"0.20.0","tier":0,"model":"","agent":"","spec":"","story":"litopys-privacy-guard-04-repair-round-1","ref":"scope:litopys-privacy-guard-04-repair-round-1"}
+{"v":1,"ts":"2026-10-04T18:23:14Z","code":"council_rounds_high","value":3,"threshold":3,"vulyk":"0.24.0","tier":2,"model":"","agent":"","spec":"correction-evidence","story":"","ref":"council:correction-evidence"}
+{"v":1,"ts":"2026-10-04T18:23:16Z","code":"scope_breach","value":1,"threshold":0,"vulyk":"0.24.0","tier":0,"model":"","agent":"","spec":"","story":"correction-evidence-02","ref":"scope:correction-evidence-02"}
